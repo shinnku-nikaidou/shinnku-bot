@@ -1,0 +1,14 @@
+python-dotenv
+python-telegram-bot
+torch
+torchvision
+torchaudio
+requests
+pyyaml
+scipy
+pandas
+matplotlib
+sympy
+cryptography
+Pillow
+IPython
