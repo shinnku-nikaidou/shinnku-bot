@@ -15,5 +15,5 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
     """Select an action: Adding parent/child or show data."""
     # pylint: disable=unused-argument
     await update.message.reply_text(
-        text="Hi, Welcome",
+        text="Hello，咱是真红",
     )
