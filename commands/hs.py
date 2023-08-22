@@ -24,15 +24,21 @@ async def hs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
     print(url + args)
     a = requests.get(url + quote(args), timeout=10)
     if a.ok:
-        res = json.loads(a.text)['success']
-        await update.message.reply_text(
-            text=res["type"],
-        )
-        await update.message.reply_text(
-            text=res["value"],
-        )
+        try:
+            res = json.loads(a.text)['success']
+            await update.message.reply_text(
+                text=res["type"],
+            )
+            await update.message.reply_text(
+                text=res["value"],
+            )
+        except Exception:
+            res = json.loads(a.text)["error"]
+            await update.message.reply_text(
+                text=res,
+            )
     else:
         update.message.reply_text(
-            text="执行有误",
+            text="unkown error",
         )
     
