@@ -8,6 +8,7 @@ from commands.start import start
 from commands.echo import echo
 from commands.hs import hs
 from commands.rua import rua
+from commands.netease import netease
 from configurations import settings
 from configurations.settings import IS_MAINTENANCE
 from utils import logger
@@ -27,5 +28,6 @@ if __name__ == "__main__":
         application.add_handler(CommandHandler("echo", echo))
         application.add_handler(CommandHandler("hs", hs))
         application.add_handler(CommandHandler("rua", rua))
+        application.add_handler(CommandHandler("netease", netease))
         """YOUR COMMANDS IS HERE WHEN BOT IS NOT MAINTENANCE"""
     application.run_polling()

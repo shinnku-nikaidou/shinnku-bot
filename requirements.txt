@@ -12,3 +12,4 @@ sympy
 cryptography
 Pillow
 IPython
+wget
