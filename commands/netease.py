@@ -24,42 +24,42 @@ def postnetease(scr):
     target = "https://netease.project.ac.cn/search?keywords="
     plus = "&limit=1"
     header = {
-        'User-Agent': user_agent,
+        "User-Agent": user_agent,
     }
-    respond = requests.get(target+scr+plus, headers=header)
+    respond = requests.get(target + scr + plus, headers=header)
     print(respond.content)
     return json.loads(respond.content)
 
-def get_download_link(_id:int):
+
+def get_download_link(_id: int):
     target = "https://netease.project.ac.cn/song/url?id="
     header = {
-        'User-Agent': user_agent,
+        "User-Agent": user_agent,
     }
-    respond = requests.get(target+str(_id), headers=header)
+    respond = requests.get(target + str(_id), headers=header)
     print(respond.content)
     return json.loads(respond.content)["data"][0]["url"]
 
+
 def download_music(url, music_path):
-    headers={
-        'User-Agent':user_agent,
-        'Referer':'http://music.163.com/'
-    }
+    headers = {"User-Agent": user_agent, "Referer": "http://music.163.com/"}
     response = requests.get(url=url, headers=headers)
     music_data = response.content
-    with open(music_path, 'wb') as f:
+    with open(music_path, "wb") as f:
         f.write(music_data)
-        print(music_path, '下载成功')
+        print(music_path, "下载成功")
+
 
 @send_action(ChatAction.TYPING)
-async def netease(update: Update,context: ContextTypes.DEFAULT_TYPE) -> str:
+async def netease(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
     t = str(update.message.text[8:]).strip()
     a = postnetease(t)
     print(a)
-    _id = int(a['result']['songs'][0]['id'])
-    name = a['result']['songs'][0]['name']
+    _id = int(a["result"]["songs"][0]["id"])
+    name = a["result"]["songs"][0]["name"]
     print(_id)
     url = get_download_link(_id)
     mp3_path = f"./data/netease/{name}.mp3"
     download_music(url, mp3_path)
     # subprocess.call(["ffmpeg", "-n", "-i", mp3_path, "-acodec", "aac", "-ac", "2", "-ar", "44100", aac_path])
-    await update.message.reply_audio(audio=open(mp3_path, 'rb'))
+    await update.message.reply_audio(audio=open(mp3_path, "rb"))

@@ -15,10 +15,15 @@ from utils import logger
 
 if __name__ == "__main__":
     logger.init_logger(f"logs/{settings.NAME}.log")
-    application = (Application.builder().token(
-        settings.TOKEN).read_timeout(50).write_timeout(
-            50).get_updates_read_timeout(50).build())
-    print(f'IS_MAINTENANCE {IS_MAINTENANCE}')
+    application = (
+        Application.builder()
+        .token(settings.TOKEN)
+        .read_timeout(50)
+        .write_timeout(50)
+        .get_updates_read_timeout(50)
+        .build()
+    )
+    print(f"IS_MAINTENANCE = {IS_MAINTENANCE}")
     if IS_MAINTENANCE:
         application.add_handler(CommandHandler("start", maintenance))
         # application.add_handler(

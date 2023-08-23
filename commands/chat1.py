@@ -13,7 +13,5 @@ logger = getLogger(__name__)
 
 
 @send_action(ChatAction.TYPING)
-async def shinnku(update: Update,context: ContextTypes.DEFAULT_TYPE) -> str:
-    # pylint: disable=unused-argument
+async def shinnku(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
     pass
-

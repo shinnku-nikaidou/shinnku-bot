@@ -7,6 +7,7 @@ from utils.decorators import send_action
 from urllib.parse import quote
 import json
 import requests
+
 # Init logger
 
 logger = getLogger(__name__)
@@ -25,7 +26,7 @@ async def hs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
     a = requests.get(url + quote(args), timeout=10)
     if a.ok:
         try:
-            res = json.loads(a.text)['success']
+            res = json.loads(a.text)["success"]
             await update.message.reply_text(
                 text=res["type"],
             )
@@ -41,4 +42,3 @@ async def hs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
         update.message.reply_text(
             text="unkown error",
         )
-    
