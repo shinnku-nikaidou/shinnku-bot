@@ -29,7 +29,6 @@ async def chat_shinnku(update: Update, context: ContextTypes.DEFAULT_TYPE) -> st
             {"role": "user", "content": t},
         ],
     )
-    response = json.loads(response)
     content = response["choices"][0]["message"]["content"]
     await update.message.reply_text(content)
     # await context.bot.send_message(
