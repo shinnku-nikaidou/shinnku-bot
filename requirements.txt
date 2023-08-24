@@ -13,3 +13,4 @@ cryptography
 Pillow
 IPython
 black
+openai
