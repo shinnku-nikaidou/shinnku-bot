@@ -4,6 +4,8 @@ from telegram import Update
 from telegram.constants import ChatAction
 from telegram.ext import ContextTypes
 from utils.decorators import send_action
+from utils.text_handling import cut_command_text
+
 from urllib.parse import quote
 import json
 import requests
@@ -17,7 +19,7 @@ logger = getLogger(__name__)
 async def hs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
     """Select an action: Adding parent/child or show data."""
     # pylint: disable=unused-argument
-    args = update.message.text.strip()[3:].strip()
+    args = cut_command_text(update.message.text)
     args = args.replace("（", "(")
     args = args.replace("）", ")")
     args = args.replace("，", ",")

@@ -6,6 +6,8 @@ from telegram.constants import ChatAction
 from telegram.ext import ContextTypes
 
 from utils.decorators import send_action
+from utils.text_handling import cut_command_text
+
 from configurations import settings
 
 import openai
@@ -15,13 +17,9 @@ import json
 
 logger = getLogger(__name__)
 
-openai.api_key = settings.OPENAI_API_KEY
 
-
-@send_action(ChatAction.TYPING)
-async def chat_shinnku(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
-    t = str(update.message.text[8:]).strip()
-
+def get_shinnku_reply(t: str):
+    openai.api_key = settings.OPENAI_API_KEY
     response = openai.ChatCompletion.create(
         model="gpt-3.5-turbo",
         messages=[
@@ -30,8 +28,19 @@ async def chat_shinnku(update: Update, context: ContextTypes.DEFAULT_TYPE) -> st
         ],
     )
     content = response["choices"][0]["message"]["content"]
+    content = content.replace("一个AI助手", "真红")
+    content = content.replace("AI助手", "真红")
+    return content
+
+
+@send_action(ChatAction.TYPING)
+async def chat_shinnku_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+    t = cut_command_text(update.message.text)
+    content = get_shinnku_reply(t)
     await update.message.reply_text(content)
-    # await context.bot.send_message(
-    #     chat_id=update.message.chat_id,
-    #     text=xxx,
-    # )
+
+
+@send_action(ChatAction.TYPING)
+async def chat_shinnku_ref(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+    content = get_shinnku_reply(update.message.text.strip())
+    await update.message.reply_text(content)

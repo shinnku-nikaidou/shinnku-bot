@@ -6,6 +6,7 @@ from telegram.constants import ChatAction
 from telegram.ext import ContextTypes
 
 from utils.decorators import send_action
+from utils.text_handling import cut_command_text
 from constants.craw import user_agent
 import json
 import re
@@ -52,7 +53,7 @@ def download_music(url, music_path):
 
 @send_action(ChatAction.TYPING)
 async def netease(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
-    t = str(update.message.text[8:]).strip()
+    t = cut_command_text(update.message.text)
     a = postnetease(t)
     print(a)
     _id = int(a["result"]["songs"][0]["id"])
