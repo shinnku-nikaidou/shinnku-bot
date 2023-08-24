@@ -9,6 +9,8 @@ NAME = os.environ["NAME"]
 ADMIN_TELEGRAM_USER_ID = int(os.environ["ADMIN_TELEGRAM_USER_ID"])
 IS_MAINTENANCE = bool(os.environ["IS_MAINTENANCE"])
 LIST_OF_ADMINS = [ADMIN_TELEGRAM_USER_ID]
+OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
+
 WEBHOOK = False
 # The following configuration is only needed if you setted WEBHOOK to True #
 WEBHOOK_OPTIONS = {

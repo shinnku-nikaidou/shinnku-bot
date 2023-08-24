@@ -10,6 +10,7 @@ from commands.hs import hs
 from commands.rua import rua
 from commands.netease import netease
 from commands.okiru import okiru
+from commands.chat_ver1 import chat_shinnku
 from configurations import settings
 from configurations.settings import IS_MAINTENANCE
 from utils import logger
@@ -36,5 +37,6 @@ if __name__ == "__main__":
         application.add_handler(CommandHandler("rua", rua))
         application.add_handler(CommandHandler("netease", netease))
         application.add_handler(CommandHandler("okiru", okiru))
+        application.add_handler(CommandHandler("shinnku", chat_shinnku))
         """YOUR COMMANDS IS HERE WHEN BOT IS NOT MAINTENANCE"""
     application.run_polling()
