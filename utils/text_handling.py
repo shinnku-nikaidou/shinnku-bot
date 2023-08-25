@@ -10,3 +10,9 @@ def cut_command_text(command_text: str):
         return t[m1.span()[1]:]
     else:
         return t[m2.span()[1]:]
+
+def replace_ai2shinnku(content: str):
+    content = content.replace("一个AI助手", "真红")
+    content = content.replace("AI助手", "真红")
+    content = content.replace("人工智能助手", "真红")
+    return content

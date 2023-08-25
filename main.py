@@ -10,7 +10,8 @@ from commands.hs import hs
 from commands.rua import rua
 from commands.netease import netease
 from commands.okiru import okiru
-from commands.chat_ver1 import chat_shinnku_cmd, chat_shinnku_ref
+from commands.chat_turbo import chat_turbo_cmd, chat_turbo_ref
+from commands.chat_alpaca import chat_alpaca_cmd, chat_alpaca_ref
 from configurations import settings
 from configurations.settings import IS_MAINTENANCE
 from utils import logger
@@ -28,21 +29,22 @@ if __name__ == "__main__":
     print(f"IS_MAINTENANCE = {IS_MAINTENANCE}")
     if IS_MAINTENANCE:
         application.add_handler(CommandHandler("start", maintenance))
-        # application.add_handler(
-        #     MessageHandler(filters.TEXT & ~filters.COMMAND, maintenance))
     else:
         application.add_handler(CommandHandler("start", start))
         application.add_handler(CommandHandler("echo", echo))
         application.add_handler(CommandHandler("hs", hs))
         application.add_handler(CommandHandler("rua", rua))
-        application.add_handler(CommandHandler("netease", netease))
+        application.add_handler(CommandHandler("music", netease))
         application.add_handler(CommandHandler("okiru", okiru))
-        application.add_handler(CommandHandler("shinnku", chat_shinnku_cmd))
+        application.add_handler(CommandHandler("chat", chat_turbo_cmd))
+        application.add_handler(CommandHandler("shinku", chat_alpaca_cmd))
         application.add_handler(
             MessageHandler(
-                filters.TEXT & ~filters.COMMAND & filters.Regex(r"(真红|(s|S)hi(nn|n)ku)"),
-                chat_shinnku_ref,
+                filters.TEXT
+                & ~filters.COMMAND
+                & filters.Regex(r"(真(红|紅)|(s|S)hi(nn|n)ku)")
+                & ~filters.Regex(r"shinnku(group|channel)"),
+                chat_turbo_ref,
             )
         )
-        """YOUR COMMANDS IS HERE WHEN BOT IS NOT MAINTENANCE"""
     application.run_polling()
