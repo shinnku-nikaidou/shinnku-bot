@@ -44,7 +44,7 @@ if __name__ == "__main__":
                 & ~filters.COMMAND
                 & filters.Regex(r"(真(红|紅)|(s|S)hi(nn|n)ku)")
                 & ~filters.Regex(r"shinnku(group|channel)"),
-                chat_turbo_ref,
+                chat_alpaca_ref,
             )
         )
     application.run_polling()
