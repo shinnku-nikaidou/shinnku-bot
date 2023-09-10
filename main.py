@@ -10,7 +10,7 @@ from commands.hs import hs
 from commands.rua import rua
 from commands.netease import netease
 from commands.okiru import okiru
-from commands.admin import py, apy
+from commands.admin import py, apy, admin
 from commands.chat_turbo import chat_turbo_cmd, chat_turbo_ref
 from commands.chat_alpaca import chat_alpaca_cmd, chat_alpaca_ref
 from configurations import settings
@@ -41,12 +41,12 @@ if __name__ == "__main__":
         application.add_handler(CommandHandler("shinku", chat_alpaca_cmd))
         application.add_handler(CommandHandler("py", py))
         application.add_handler(CommandHandler("apy", apy))
+        application.add_handler(CommandHandler("admin", admin))
         application.add_handler(
             MessageHandler(
                 filters.TEXT
                 & ~filters.COMMAND
-                & filters.Regex(r"(真(红|紅)|(s|S)hi(nn|n)ku)")
-                & ~filters.Regex(r"shinnku(group|channel)"),
+                & filters.Regex(r"(真(红|紅))"),
                 chat_alpaca_ref,
             )
         )

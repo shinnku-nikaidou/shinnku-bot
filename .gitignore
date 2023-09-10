@@ -110,3 +110,5 @@ tmp*
 data
 
 sample.log*
+
+anon.session
