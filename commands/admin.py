@@ -7,6 +7,17 @@ from telegram.ext import ContextTypes
 
 from utils.decorators import restricted
 from utils.text_handling import cut_command_text
+import re
+import json
+import requests
+import openai
+import utils
+import telegram
+import sympy
+import numpy as np
+import scipy
+import pandas
+
 
 # Init logger
 
@@ -20,6 +31,7 @@ async def py(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
         a = eval(cmd)
     except Exception as e:
         a = e
+    print(a)
     await update.message.reply_text(f"`{a}`", parse_mode="MarkdownV2")
 
 
@@ -30,4 +42,5 @@ async def apy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
         a = await eval(cmd)
     except Exception as e:
         a = e
+    print(a)
     await update.message.reply_text(f"`{a}`", parse_mode="MarkdownV2")

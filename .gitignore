@@ -108,3 +108,5 @@ venv.bak/
 
 tmp*
 data
+
+sample.log*
