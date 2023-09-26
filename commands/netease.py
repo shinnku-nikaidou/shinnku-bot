@@ -59,8 +59,11 @@ async def netease(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
     _id = int(a["result"]["songs"][0]["id"])
     name = a["result"]["songs"][0]["name"]
     print(_id)
-    url = get_download_link(_id)
-    mp3_path = f"./data/netease/{name}.mp3"
-    download_music(url, mp3_path)
+    url :str = get_download_link(_id)
+    if url.endswith("mp3"):
+        music_path = f"./data/netease/{name}.mp3"
+    elif url.endswith("flac"):
+        music_path = f"./data/netease/{name}.flac"
+    download_music(url, music_path)
     # subprocess.call(["ffmpeg", "-n", "-i", mp3_path, "-acodec", "aac", "-ac", "2", "-ar", "44100", aac_path])
-    await update.message.reply_audio(audio=open(mp3_path, "rb"))
+    await update.message.reply_audio(audio=open(music_path, "rb"))
