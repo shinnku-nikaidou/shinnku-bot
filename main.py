@@ -45,13 +45,13 @@ if __name__ == "__main__":
         application.add_handler(CommandHandler("admin", admin))
         application.add_handler(
             MessageHandler(
-                filters.TEXT & ~filters.COMMAND & filters.Regex(r"(真(红|紅))"),
+                filters.TEXT & ~filters.COMMAND & filters.Regex(r"(真紅|是什么)"),
                 chat_alpaca_ref,
             )
         )
         application.add_handler(
             MessageHandler(
-                filters.TEXT & filters.Regex(r"(还行|海星|azkhx)"),
+                filters.TEXT & filters.Regex(r"(海星|azkhx|quq)"),
                 delete_msg,
             )
         )
