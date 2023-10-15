@@ -17,3 +17,13 @@ async def delete_msg(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
     await context.bot.delete_message(
         chat_id=update.message.chat.id, message_id=update.message.message_id
     )
+
+
+async def delete_pic(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+    # await asyncio.sleep(4)
+    print("this is pic ", update.message.sticker.file_unique_id)
+    a = "AgADBBAAAmovCVU"
+    if update.message.sticker.file_unique_id == a:
+        await context.bot.delete_message(
+            chat_id=update.message.chat.id, message_id=update.message.message_id
+        )

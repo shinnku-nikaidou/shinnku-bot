@@ -11,7 +11,7 @@ from commands.rua import rua
 from commands.netease import netease
 from commands.okiru import okiru
 from commands.admin import py, apy, admin
-from commands.ban import delete_msg
+from commands.ban import delete_msg, delete_pic
 from commands.chat_turbo import chat_turbo_cmd, chat_turbo_ref
 from commands.chat_alpaca import chat_alpaca_cmd, chat_alpaca_ref
 from configurations import settings
@@ -33,6 +33,12 @@ if __name__ == "__main__":
         application.add_handler(CommandHandler("start", maintenance))
     else:
         application.add_handler(CommandHandler("start", start))
+        application.add_handler(
+            MessageHandler(
+                filters.TEXT & filters.Regex(r"(啊(这|這)|(hai|海|🌊).*(⭐️|星|xin)|azkhx|quq|(鸭嘴|泰|瑞).*(png|jp))"),
+                delete_msg,
+            )
+        )
         application.add_handler(CommandHandler("echo", echo))
         application.add_handler(CommandHandler("hs", hs))
         application.add_handler(CommandHandler("rua", rua))
@@ -51,8 +57,9 @@ if __name__ == "__main__":
         )
         application.add_handler(
             MessageHandler(
-                filters.TEXT & filters.Regex(r"(海星|azkhx|quq)"),
-                delete_msg,
+                ~filters.TEXT,
+                delete_pic,
             )
         )
+        
     application.run_polling()
