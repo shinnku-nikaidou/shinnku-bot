@@ -7,7 +7,7 @@ from commands.maintenance import maintenance
 from commands.start import start
 from commands.echo import echo
 from commands.hs import hs
-from commands.rua import rua
+from commands.rua import rua, rua2
 from commands.netease import netease
 from commands.okiru import okiru
 from commands.admin import py, apy, admin
@@ -35,7 +35,7 @@ if __name__ == "__main__":
         application.add_handler(CommandHandler("start", start))
         application.add_handler(
             MessageHandler(
-                filters.TEXT & filters.Regex(r"(啊(这|這)|(hai|海|🌊).*(⭐️|星|xin)|azkhx|quq|(鸭嘴|泰|瑞).*(png|jp))"),
+                filters.TEXT & filters.Regex(r"(啊(这|這)|(hai|海|🌊).*(⭐️|星|xin)|azkhx|quq)"),
                 delete_msg,
             )
         )
@@ -58,8 +58,14 @@ if __name__ == "__main__":
         application.add_handler(
             MessageHandler(
                 ~filters.TEXT,
+                rua2,
+            )
+        )
+        application.add_handler(
+            MessageHandler(
+                ~filters.TEXT,
                 delete_pic,
             )
         )
-        
+
     application.run_polling()

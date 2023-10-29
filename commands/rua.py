@@ -20,3 +20,8 @@ async def rua(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
         await update.message.reply_sticker(sticker=sticker.shinnku[0])
     else:
         await update.message.reply_sticker(sticker=sticker.shinnku[1])
+
+
+async def rua2(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+    if update.message.sticker.file_unique_id == "AgAD-wUAAvjGxQo":
+        await update.message.reply_text(text="/rua")

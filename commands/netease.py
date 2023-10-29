@@ -27,7 +27,7 @@ def postnetease(scr):
     header = {
         "User-Agent": user_agent,
     }
-    respond = requests.get(target + scr + plus, headers=header)
+    respond = requests.get(target + scr + plus, headers=header, timeout=10)
     print(respond.content)
     return json.loads(respond.content)
 
@@ -37,14 +37,14 @@ def get_download_link(_id: int):
     header = {
         "User-Agent": user_agent,
     }
-    respond = requests.get(target + str(_id), headers=header)
+    respond = requests.get(target + str(_id), headers=header, timeout=10)
     print(respond.content)
     return json.loads(respond.content)["data"][0]["url"]
 
 
 def download_music(url, music_path):
     headers = {"User-Agent": user_agent, "Referer": "http://music.163.com/"}
-    response = requests.get(url=url, headers=headers)
+    response = requests.get(url=url, headers=headers, timeout=60)
     music_data = response.content
     with open(music_path, "wb") as f:
         f.write(music_data)
