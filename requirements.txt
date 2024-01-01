@@ -14,3 +14,4 @@ Pillow
 IPython
 black
 openai
+telethon

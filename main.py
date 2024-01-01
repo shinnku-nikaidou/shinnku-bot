@@ -13,7 +13,6 @@ from commands.okiru import okiru
 from commands.admin import py, apy, admin
 from commands.ban import delete_msg, delete_pic
 from commands.chat_turbo import chat_turbo_cmd, chat_turbo_ref
-from commands.chat_alpaca import chat_alpaca_cmd, chat_alpaca_ref
 from configurations import settings
 from configurations.settings import IS_MAINTENANCE
 from utils import logger
@@ -45,16 +44,9 @@ if __name__ == "__main__":
         application.add_handler(CommandHandler("music", netease))
         application.add_handler(CommandHandler("okiru", okiru))
         application.add_handler(CommandHandler("chat", chat_turbo_cmd))
-        application.add_handler(CommandHandler("shinku", chat_alpaca_cmd))
         application.add_handler(CommandHandler("py", py))
         application.add_handler(CommandHandler("apy", apy))
         application.add_handler(CommandHandler("admin", admin))
-        application.add_handler(
-            MessageHandler(
-                filters.TEXT & ~filters.COMMAND & filters.Regex(r"(真紅|是什么)"),
-                chat_alpaca_ref,
-            )
-        )
         application.add_handler(
             MessageHandler(
                 ~filters.TEXT,

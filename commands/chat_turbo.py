@@ -12,6 +12,9 @@ from constants import ai
 from configurations import settings
 
 import openai
+from openai import AsyncOpenAI
+
+aclient = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 import json
 
 # Init logger
@@ -20,16 +23,12 @@ logger = getLogger(__name__)
 
 
 async def get_turbo_reply(t: str):
-    openai.api_base = "https://api.openai.com/v1"
-    openai.api_key = settings.OPENAI_API_KEY
-    response = await openai.ChatCompletion.acreate(
-        model="gpt-3.5-turbo",
-        messages=[
-            {"role": "system", "content": ai.prompt_shinnku},
-            {"role": "user", "content": t},
-        ],
-    )
-    content = response["choices"][0]["message"]["content"]
+    response = await aclient.chat.completions.create(model="gpt-3.5-turbo",
+    messages=[
+        {"role": "system", "content": ai.prompt_shinnku},
+        {"role": "user", "content": t},
+    ])
+    content = json.loads(response.choices[0].json())["message"]["content"]
     return replace_ai2shinnku(content)
 
 
