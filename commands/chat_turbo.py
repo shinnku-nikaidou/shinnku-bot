@@ -23,7 +23,7 @@ logger = getLogger(__name__)
 
 
 async def get_turbo_reply(t: str):
-    response = await aclient.chat.completions.create(model="gpt-3.5-turbo",
+    response = await aclient.chat.completions.create(model="gpt-4.1",
     messages=[
         {"role": "system", "content": ai.prompt_shinnku},
         {"role": "user", "content": t},
