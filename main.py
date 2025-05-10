@@ -8,6 +8,7 @@ from commands.start import start
 from commands.echo import echo
 from commands.hs import hs
 from commands.rua import rua, rua2
+from commands.rust import rs
 from commands.netease import netease
 from commands.okiru import okiru
 from commands.admin import py, apy, admin
@@ -45,6 +46,7 @@ if __name__ == "__main__":
         application.add_handler(CommandHandler("okiru", okiru))
         application.add_handler(CommandHandler("chat", chat_turbo_cmd))
         application.add_handler(CommandHandler("py", py))
+        application.add_handler(CommandHandler("rust", rs))
         application.add_handler(CommandHandler("apy", apy))
         application.add_handler(CommandHandler("admin", admin))
         application.add_handler(
