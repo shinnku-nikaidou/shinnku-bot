@@ -8,12 +8,7 @@ from telegram.ext import ContextTypes
 from utils.decorators import send_action
 from utils.text_handling import cut_command_text
 from constants.craw import user_agent
-import json
-import re
-import time
 import os
-import urllib.request
-import subprocess
 import requests
 
 # Init logger
@@ -21,49 +16,46 @@ import requests
 logger = getLogger(__name__)
 
 
-def postnetease(scr):
-    target = "https://netease.project.ac.cn/search?keywords="
-    plus = "&limit=1"
-    header = {
-        "User-Agent": user_agent,
-    }
-    respond = requests.get(target + scr + plus, headers=header, timeout=10)
-    print(respond.content)
-    return json.loads(respond.content)
+def post_netease(query: str) -> dict:
+    url = "https://netease.project.ac.cn/search"
+    params = {"keywords": query, "limit": 1}
+    headers = {"User-Agent": user_agent}
+    response = requests.get(url, params=params, headers=headers, timeout=10)
+    response.raise_for_status()
+    logger.debug("search result: %s", response.content)
+    return response.json()
 
 
-def get_download_link(_id: int):
-    target = "https://netease.project.ac.cn/song/url?id="
-    header = {
-        "User-Agent": user_agent,
-    }
-    respond = requests.get(target + str(_id), headers=header, timeout=10)
-    print(respond.content)
-    return json.loads(respond.content)["data"][0]["url"]
+def get_download_link(song_id: int) -> str:
+    url = "https://netease.project.ac.cn/song/url"
+    headers = {"User-Agent": user_agent}
+    response = requests.get(url, params={"id": song_id}, headers=headers, timeout=10)
+    response.raise_for_status()
+    logger.debug("link result: %s", response.content)
+    return response.json()["data"][0]["url"]
 
 
-def download_music(url, music_path):
+def download_music(url: str, music_path: str) -> None:
     headers = {"User-Agent": user_agent, "Referer": "http://music.163.com/"}
     response = requests.get(url=url, headers=headers, timeout=60)
-    music_data = response.content
+    response.raise_for_status()
+    os.makedirs(os.path.dirname(music_path), exist_ok=True)
     with open(music_path, "wb") as f:
-        f.write(music_data)
-        print(music_path, "下载成功")
+        f.write(response.content)
+    logger.info("%s 下载成功", music_path)
 
 
 @send_action(ChatAction.TYPING)
 async def netease(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
-    t = cut_command_text(update.message.text)
-    a = postnetease(t)
-    print(a)
-    _id = int(a["result"]["songs"][0]["id"])
-    name = a["result"]["songs"][0]["name"]
-    print(_id)
-    url :str = get_download_link(_id)
-    if url.endswith("mp3"):
-        music_path = f"./data/netease/{name}.mp3"
-    elif url.endswith("flac"):
-        music_path = f"./data/netease/{name}.flac"
+    query = cut_command_text(update.message.text)
+    data = post_netease(query)
+    song_info = data["result"]["songs"][0]
+    song_id = int(song_info["id"])
+    name = song_info["name"]
+    logger.debug("song id: %s", song_id)
+    url = get_download_link(song_id)
+    ext = "mp3" if url.endswith("mp3") else "flac"
+    music_path = f"./data/netease/{name}.{ext}"
     download_music(url, music_path)
-    # subprocess.call(["ffmpeg", "-n", "-i", mp3_path, "-acodec", "aac", "-ac", "2", "-ar", "44100", aac_path])
-    await update.message.reply_audio(audio=open(music_path, "rb"))
+    with open(music_path, "rb") as f:
+        await update.message.reply_audio(audio=f)

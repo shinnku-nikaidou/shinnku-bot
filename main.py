@@ -2,6 +2,7 @@ from telegram.ext import Application
 from telegram.ext import CommandHandler
 from telegram.ext import filters
 from telegram.ext import MessageHandler
+import logging
 
 from commands.maintenance import maintenance
 from commands.start import start
@@ -18,6 +19,8 @@ from configurations import settings
 from configurations.settings import IS_MAINTENANCE
 from utils import logger
 
+log = logging.getLogger(__name__)
+
 if __name__ == "__main__":
     logger.init_logger(f"logs/{settings.NAME}.log")
     application = (
@@ -28,7 +31,7 @@ if __name__ == "__main__":
         .get_updates_read_timeout(50)
         .build()
     )
-    print(f"IS_MAINTENANCE = {IS_MAINTENANCE}")
+    log.info("IS_MAINTENANCE = %s", IS_MAINTENANCE)
     if IS_MAINTENANCE:
         application.add_handler(CommandHandler("start", maintenance))
     else:

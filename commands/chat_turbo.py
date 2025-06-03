@@ -11,7 +11,6 @@ from constants import ai
 
 from configurations import settings
 
-import openai
 from openai import AsyncOpenAI
 
 aclient = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
