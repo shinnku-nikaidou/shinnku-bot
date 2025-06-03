@@ -1,6 +1,9 @@
 from functools import wraps
+from logging import getLogger
 
 from configurations.settings import LIST_OF_ADMINS
+
+logger = getLogger(__name__)
 
 
 def restricted(func):
@@ -8,7 +11,7 @@ def restricted(func):
     async def wrapped(update, context, *args, **kwargs):
         user_id = update.effective_user.id
         if user_id not in LIST_OF_ADMINS:
-            print(f"Unauthorized access denied for {user_id}.")
+            logger.warning("Unauthorized access denied for %s.", user_id)
             return
         return await func(update, context, *args, **kwargs)
 
