@@ -24,7 +24,7 @@ async def hs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
     args = args.replace("）", ")")
     args = args.replace("，", ",")
     url = "https://tryhaskell.org/eval?exp="
-    print(url + args)
+    logger.debug(url + args)
     a = requests.get(url + quote(args), timeout=10)
     if a.ok:
         try:
