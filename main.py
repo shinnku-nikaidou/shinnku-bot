@@ -38,7 +38,8 @@ if __name__ == "__main__":
         application.add_handler(CommandHandler("start", start))
         application.add_handler(
             MessageHandler(
-                filters.TEXT & filters.Regex(r"(啊(这|這)|(hai|海|🌊).*(⭐️|星|xin)|azkhx|quq)"),
+                filters.TEXT
+                & filters.Regex(r"(啊(这|這)|(hai|海|🌊).*(⭐️|星|xin)|azkhx|quq)"),
                 delete_msg,
             )
         )
@@ -48,6 +49,12 @@ if __name__ == "__main__":
         application.add_handler(CommandHandler("music", netease))
         application.add_handler(CommandHandler("okiru", okiru))
         application.add_handler(CommandHandler("chat", chat_turbo_cmd))
+        application.add_handler(
+            MessageHandler(
+                filters.TEXT & (filters.Mention(settings.NAME) | filters.REPLY),
+                chat_turbo_ref,
+            )
+        )
         application.add_handler(CommandHandler("py", py))
         application.add_handler(CommandHandler("rust", rs))
         application.add_handler(CommandHandler("apy", apy))
