@@ -40,7 +40,6 @@ async def chat_turbo_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await update.message.reply_text(content)
 
 
-@send_action(ChatAction.TYPING)
 async def chat_turbo_ref(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
     message = update.message
     text = message.text.strip()

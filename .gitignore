@@ -73,8 +73,10 @@ target/
 .ipynb_checkpoints
 
 # pyenv
-.python-version
+# .python-version  # Commented out for uv usage
 
+# uv
+.venv/
 # celery beat schedule file
 celerybeat-schedule
 
