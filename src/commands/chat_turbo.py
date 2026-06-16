@@ -23,7 +23,7 @@ logger = getLogger(__name__)
 
 async def get_turbo_reply(t: str):
     response = await aclient.chat.completions.create(
-        model="gpt-4.1",
+        model="gpt-5.5",
         messages=[
             {"role": "system", "content": ai.prompt_shinnku},
             {"role": "user", "content": t},
@@ -42,6 +42,8 @@ async def chat_turbo_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def chat_turbo_ref(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
     message = update.message
+    if message is None or message.text is None:
+        return ""
     text = message.text.strip()
 
     # Check if the current message is a reply to the bot
@@ -75,7 +77,7 @@ async def chat_turbo_ref(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     break
 
     if not reply_to_bot and not mentioned:
-        return
+        return ""
 
     content = await get_turbo_reply(text)
     await update.message.reply_text(content)
