@@ -1,14 +1,15 @@
 # encoding: utf-8
+import json
 from logging import getLogger
+from urllib.parse import quote
+
+import httpx
 from telegram import Update
 from telegram.constants import ChatAction
 from telegram.ext import ContextTypes
+
 from utils.decorators import send_action
 from utils.text_handling import cut_command_text
-
-from urllib.parse import quote
-import json
-import requests
 
 # Init logger
 
@@ -25,22 +26,20 @@ async def hs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
     args = args.replace("，", ",")
     url = "https://tryhaskell.org/eval?exp="
     logger.debug(url + args)
-    a = requests.get(url + quote(args), timeout=10)
-    if a.ok:
+
+    async with httpx.AsyncClient(timeout=10) as client:
+        response = await client.get(url + quote(args))
+
+    if response.is_success:
         try:
-            res = json.loads(a.text)["success"]
-            await update.message.reply_text(
-                text=res["type"],
-            )
-            await update.message.reply_text(
-                text=res["value"],
-            )
+            res = json.loads(response.text)["success"]
+            await update.message.reply_text(text=res["type"])
+            await update.message.reply_text(text=res["value"])
+            return res["value"]
         except Exception:
-            res = json.loads(a.text)["error"]
-            await update.message.reply_text(
-                text=res,
-            )
-    else:
-        update.message.reply_text(
-            text="unkown error",
-        )
+            res = json.loads(response.text)["error"]
+            await update.message.reply_text(text=res)
+            return res
+
+    await update.message.reply_text(text="unknown error")
+    return "unknown error"

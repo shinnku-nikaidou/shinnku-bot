@@ -1,16 +1,17 @@
 # encoding: utf-8
 from logging import getLogger
+
+import httpx
 from telegram import Update
 from telegram.constants import ChatAction
 from telegram.ext import ContextTypes
+
 from utils.decorators import send_action
 from utils.text_handling import cut_command_text
 
-import json
-import requests
-
 # Init logger
 logger = getLogger(__name__)
+
 
 @send_action(ChatAction.TYPING)
 async def rs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
@@ -27,20 +28,20 @@ async def rs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
         "version": "stable",
         "optimize": "0",
         "code": args,
-        "edition": "2021"
+        "edition": "2021",
     }
     try:
-        response = requests.post(url, json=payload, timeout=10)
-        if response.ok:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.post(url, json=payload)
+        if response.is_success:
             data = response.json()
             error = data.get("error")
             if error:
                 await update.message.reply_text(text=error)
-            else:
-                await update.message.reply_text(text=data.get("result", ""))
-        else:
-            pass
-            # await update.message.reply_text(text="Unknown error contacting Rust Playground")
-    except Exception as e:
+                return error
+            result = data.get("result", "")
+            await update.message.reply_text(text=result)
+            return result
+    except Exception:
         logger.exception("Error evaluating Rust code")
-        # await update.message.reply_text(text=str(e))
+    return ""

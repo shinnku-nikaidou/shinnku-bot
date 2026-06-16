@@ -48,4 +48,3 @@ async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
         a = str(e)
     logger.debug(a)
     await update.message.reply_text(f"`{a[:4000]}`", parse_mode="MarkdownV2")
-
