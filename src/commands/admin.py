@@ -9,7 +9,6 @@ from utils.text_handling import cut_command_text
 from telethon import TelegramClient
 from configurations import settings
 
-
 # Init logger
 
 logger = getLogger(__name__)

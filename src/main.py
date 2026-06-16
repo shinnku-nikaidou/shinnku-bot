@@ -18,6 +18,7 @@ from commands.chat_turbo import chat_turbo_cmd, chat_turbo_ref
 from configurations import settings
 from configurations.settings import IS_MAINTENANCE
 from utils import logger
+from utils.message_store import record_text_message
 
 log = logging.getLogger(__name__)
 
@@ -32,6 +33,7 @@ if __name__ == "__main__":
         .build()
     )
     log.info("IS_MAINTENANCE = %s", IS_MAINTENANCE)
+    application.add_handler(MessageHandler(filters.TEXT, record_text_message), group=-1)
     if IS_MAINTENANCE:
         application.add_handler(CommandHandler("start", maintenance))
     else:

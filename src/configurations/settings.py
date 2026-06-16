@@ -19,6 +19,11 @@ IS_MAINTENANCE = get_bool_env("IS_MAINTENANCE")
 LIST_OF_ADMINS = [ADMIN_TELEGRAM_USER_ID]
 OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.5")
+MESSAGE_CONTEXT_DB_PATH = os.environ.get(
+    "MESSAGE_CONTEXT_DB_PATH", "data/messages.sqlite3"
+)
+MESSAGE_CONTEXT_LIMIT = int(os.environ.get("MESSAGE_CONTEXT_LIMIT", "20"))
+MESSAGE_CONTEXT_MAX_AGE_DAYS = int(os.environ.get("MESSAGE_CONTEXT_MAX_AGE_DAYS", "30"))
 api_id = os.environ["api_id"]
 api_hash = os.environ["api_hash"]
 
