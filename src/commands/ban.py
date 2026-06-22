@@ -7,18 +7,26 @@ from telegram.ext import ContextTypes
 logger = getLogger(__name__)
 
 
-async def delete_msg(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+async def delete_msg(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.message
+    if message is None:
+        return
+
     await context.bot.delete_message(
-        chat_id=update.message.chat.id,
-        message_id=update.message.message_id,
+        chat_id=message.chat_id,
+        message_id=message.message_id,
     )
 
 
-async def delete_pic(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
-    logger.debug("this is pic %s", update.message.sticker.file_unique_id)
+async def delete_pic(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.message
+    if message is None or message.sticker is None:
+        return
+
+    logger.debug("this is pic %s", message.sticker.file_unique_id)
     a = "AgADBBAAAmovCVU"
-    if update.message.sticker.file_unique_id == a:
+    if message.sticker.file_unique_id == a:
         await context.bot.delete_message(
-            chat_id=update.message.chat.id,
-            message_id=update.message.message_id,
+            chat_id=message.chat_id,
+            message_id=message.message_id,
         )

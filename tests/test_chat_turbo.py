@@ -3,6 +3,9 @@ import unittest
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+from telegram.constants import ParseMode
+from telegram.error import BadRequest
+
 os.environ.setdefault("TOKEN", "test-token")
 os.environ.setdefault("NAME", "testbot")
 os.environ.setdefault("ADMIN_TELEGRAM_USER_ID", "1")
@@ -10,7 +13,7 @@ os.environ.setdefault("OPENAI_API_KEY", "test-key")
 os.environ.setdefault("api_id", "1")
 os.environ.setdefault("api_hash", "test-hash")
 
-from commands.chat_turbo import should_reply_to_message
+from commands.chat_turbo import _reply_markdown_safe, should_reply_to_message
 
 
 @dataclass
@@ -39,6 +42,19 @@ class FakeMessage:
     entities: list[FakeEntity] | None = None
     chat_id: int = 100
     date: datetime = datetime.now(timezone.utc)
+
+
+class FakeReplyMessage:
+    def __init__(self, error: BadRequest | None = None):
+        self.error = error
+        self.calls = []
+        self.sent_message = object()
+
+    async def reply_text(self, text: str, **kwargs):
+        self.calls.append((text, kwargs))
+        if self.error is not None and len(self.calls) == 1:
+            raise self.error
+        return self.sent_message
 
 
 class ChatTurboTriggerTests(unittest.TestCase):
@@ -78,6 +94,44 @@ class ChatTurboTriggerTests(unittest.TestCase):
         message = FakeMessage(1, "self", FakeUser(99, is_bot=True))
 
         self.assertFalse(should_reply_to_message(message, 99, "testbot"))
+
+
+class ChatTurboMarkdownReplyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_markdown_reply_succeeds_without_fallback(self):
+        message = FakeReplyMessage()
+
+        sent_message = await _reply_markdown_safe(message, "**hello**")
+
+        self.assertIs(sent_message, message.sent_message)
+        self.assertEqual(
+            message.calls,
+            [("*hello*", {"parse_mode": ParseMode.MARKDOWN_V2})],
+        )
+
+    async def test_markdown_parse_error_falls_back_to_plain_text(self):
+        message = FakeReplyMessage(BadRequest("Can't parse entities: bad markdown"))
+
+        sent_message = await _reply_markdown_safe(message, "**hello")
+
+        self.assertIs(sent_message, message.sent_message)
+        self.assertEqual(
+            message.calls,
+            [
+                ("\\*\\*hello", {"parse_mode": ParseMode.MARKDOWN_V2}),
+                ("**hello", {}),
+            ],
+        )
+
+    async def test_other_bad_request_is_re_raised(self):
+        message = FakeReplyMessage(BadRequest("Message is too long"))
+
+        with self.assertRaises(BadRequest):
+            await _reply_markdown_safe(message, "hello")
+
+        self.assertEqual(
+            message.calls,
+            [("hello", {"parse_mode": ParseMode.MARKDOWN_V2})],
+        )
 
 
 if __name__ == "__main__":

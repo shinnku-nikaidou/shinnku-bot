@@ -4,8 +4,10 @@ from typing import Any
 
 from openai import AsyncOpenAI
 from telegram import Message, Update
-from telegram.constants import ChatAction
+from telegram.constants import ChatAction, ParseMode
+from telegram.error import BadRequest
 from telegram.ext import ContextTypes
+from telegramify_markdown import markdownify
 
 from configurations import settings
 from constants import ai
@@ -39,7 +41,7 @@ def remove_bot_mentions(
     bot_id: int,
     bot_username: str | None,
 ) -> tuple[str, bool]:
-    text = (message.text or "").strip()
+    text: str = (message.text or "").strip()
     if not message.entities:
         return text, False
 
@@ -114,6 +116,20 @@ async def get_turbo_reply(model_input: list[dict[str, str]]) -> str:
     return replace_ai2shinnku(response.output_text)
 
 
+async def _reply_markdown_safe(message: Message, content: str) -> Message:
+    formatted_content = markdownify(content)
+    try:
+        return await message.reply_text(
+            formatted_content,
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+    except BadRequest as exc:
+        if "can't parse entities" not in str(exc).lower():
+            raise
+        logger.warning("MarkdownV2 parse failed; falling back to plain text: %s", exc)
+        return await message.reply_text(content)
+
+
 async def _reply_with_context(
     message: Message,
     text: str,
@@ -122,7 +138,7 @@ async def _reply_with_context(
     record_message(message)
     model_input = build_chat_context(message, text, context.bot.id)
     content = await get_turbo_reply(model_input)
-    sent_message = await message.reply_text(content)
+    sent_message = await _reply_markdown_safe(message, content)
     record_message(sent_message, reply_to_message_id=message.message_id)
     return content
 

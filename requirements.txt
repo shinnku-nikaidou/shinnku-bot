@@ -15,3 +15,4 @@ IPython>=9.14.1
 black>=26.5.1
 openai>=2.41.1
 telethon>=1.44.0
+telegramify-markdown>=1.2.0
