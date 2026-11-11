@@ -104,6 +104,17 @@ class AnswerTests(HarnessCase):
         outcome = await harness.answer(msg(1, "有人吗"), "name")
         self.assertEqual((outcome.kind, outcome.attempts), ("silent", 2))
 
+    async def test_a_failed_call_is_asked_again_once(self) -> None:
+        harness = self.build(FakeModel(TimeoutError(), say("在")))
+        outcome = await harness.answer(msg(1, "有人吗"), "name")
+        self.assertEqual((outcome.kind, outcome.attempts, self.outbox.texts), ("said", 2, ["在"]))
+        self.assertEqual(self.model.options, [{}, {"thinking": False}])
+
+        harness = self.build(FakeModel(TimeoutError()))
+        with self.assertRaises(TimeoutError):
+            await harness.answer(msg(1, "有人吗"), "name")
+        self.assertEqual(len(self.model.calls), 2)
+
     async def test_off_draft_gets_one_second_try(self) -> None:
         harness = self.build(FakeModel(say(AI_TONE), say("不知道")))
         outcome = await harness.answer(msg(1, "这个怎么弄"), "mention")
@@ -235,7 +246,7 @@ class DebounceTests(HarnessCase):
 
     async def test_model_failure_does_not_wedge_the_chat(self) -> None:
         class Flaky(FakeModel):
-            async def complete(self, messages, tools):  # type: ignore[override]
+            async def complete(self, messages, tools, **options):  # type: ignore[override]
                 if not self.calls:
                     self.calls.append(messages)
                     raise RuntimeError("gateway down")

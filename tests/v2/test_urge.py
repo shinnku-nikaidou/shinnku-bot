@@ -431,7 +431,7 @@ class UrgeCheckTests(CorpusCase):
 
     def test_errors_are_left_out(self) -> None:
         class Broken:
-            async def complete(self, messages: object, tools: object) -> None:
+            async def complete(self, messages: object, tools: object, **options: object) -> None:
                 raise TimeoutError
 
         db = self.corpus(self.rounds(40), test_pairs=5)

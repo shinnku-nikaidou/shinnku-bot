@@ -7,7 +7,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from openai import AsyncOpenAI
+from openai import APITimeoutError, AsyncOpenAI
 
 
 @dataclass(frozen=True)
@@ -97,9 +97,12 @@ class GatewayModel:
         self, messages: list[dict[str, Any]], tools: list[dict[str, Any]], *, thinking: bool | None = None
     ) -> ModelReply:
         started = time.monotonic()
-        response = await self._client.chat.completions.create(
-            **self.request_kwargs(messages, tools, thinking)
-        )
+        try:
+            response = await self._client.chat.completions.create(
+                **self.request_kwargs(messages, tools, thinking)
+            )
+        except APITimeoutError as exc:
+            raise TimeoutError("the model did not answer in time") from exc
         latency = time.monotonic() - started
 
         message = response.choices[0].message

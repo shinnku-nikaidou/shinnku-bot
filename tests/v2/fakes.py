@@ -61,7 +61,10 @@ class FakeModel:
         if self.delay:
             await asyncio.sleep(self.delay)
         self.finished += 1
-        return self.replies.pop(0) if len(self.replies) > 1 else self.replies[0]
+        reply = self.replies.pop(0) if len(self.replies) > 1 else self.replies[0]
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
 
 
 class ToolModel:

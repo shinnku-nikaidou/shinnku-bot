@@ -450,7 +450,7 @@ class FactProbeTests(Tmp):
 
     def test_errors_are_counted_apart(self) -> None:
         class Broken:
-            async def complete(self, messages: object, tools: object) -> None:
+            async def complete(self, messages: object, tools: object, **options: object) -> None:
                 raise TimeoutError
 
         probes = [{"question": f"问题{i}", "keywords": ["x"]} for i in range(12)]
@@ -531,7 +531,7 @@ class DigestTests(Tmp):
 
     def test_one_broken_chat_does_not_stop_the_rest(self) -> None:
         class Broken:
-            async def complete(self, messages: object, tools: object) -> None:
+            async def complete(self, messages: object, tools: object, **options: object) -> None:
                 raise TimeoutError("chat text must not leak")
 
         self.fill(LIVE_CHAT)

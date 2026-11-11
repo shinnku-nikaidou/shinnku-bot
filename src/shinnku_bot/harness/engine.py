@@ -286,7 +286,16 @@ class Harness:
             )
             if messages is None:
                 return Outcome("nothing")
-            reply = await self.model.complete(messages, TOOLS, **plain)
+            try:
+                reply = await self.model.complete(messages, TOOLS, **plain)
+            except TimeoutError:
+                # Thinking for too long gets the same second chance as thinking to no end.
+                if attempt or plain:
+                    raise
+                log.warning("model call timed out chat=%s", chat_id)
+                attempts += 1
+                plain = {"thinking": False}
+                continue
             attempts += 1
             latency += reply.latency_s
             thought.append(reply.reasoning_tokens)

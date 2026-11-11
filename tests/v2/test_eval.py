@@ -185,7 +185,7 @@ class RunTests(unittest.IsolatedAsyncioTestCase):
         class SpotsTheBot:
             """Picks whichever candidate is not the bot's fixed line."""
 
-            async def complete(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> ModelReply:
+            async def complete(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]], **options: Any) -> ModelReply:
                 text = messages[1]["content"]
                 return pick("B" if "【候选 A】\n我: 假的回答" in text else "A")
 
@@ -205,7 +205,7 @@ class RunTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(summarize(items)["silent_rate"], 1.0)
 
         class Broken(FakeModel):
-            async def complete(self, messages: Any, tools: Any) -> ModelReply:
+            async def complete(self, messages: Any, tools: Any, **options: Any) -> ModelReply:
                 raise TimeoutError("gateway")
 
         items = await self.run_eval(Broken(say("x")), None)
@@ -214,9 +214,9 @@ class RunTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_gives_up_when_nothing_works(self) -> None:
         class Broken(FakeModel):
-            async def complete(self, messages: Any, tools: Any) -> ModelReply:
+            async def complete(self, messages: Any, tools: Any, **options: Any) -> ModelReply:
                 self.calls.append(messages)
-                raise TimeoutError("gateway")
+                raise RuntimeError("quota")  # not a timeout, so no second try: one call per item
 
         model = Broken(say("x"))
         items = await run_eval(
