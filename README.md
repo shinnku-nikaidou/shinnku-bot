@@ -43,8 +43,8 @@ by git.
 ## Distil who I am
 
 ```bash
-uv run --inexact shinnku corpus distill self      # drafts SELF.md, FACTS.md and a quiz about me
-uv run --inexact shinnku corpus distill publish   # after reading and editing the drafts
+uv run --inexact shinnku corpus distill self      # drafts FACTS.md and a quiz about me
+uv run --inexact shinnku corpus distill publish   # after reading and editing the draft
 uv run --inexact shinnku corpus distill people    # a card per person I talk to most, per group
 uv run --inexact shinnku corpus distill groups    # a card per group
 uv run --inexact shinnku corpus moments           # learn when I join in uncalled (no model calls)
@@ -53,6 +53,10 @@ uv run --inexact shinnku corpus moments           # learn when I join in uncalle
 Each command prints the size of the job first; `--dry-run` stops there. Results
 are kept per chunk, so an interrupted run continues where it stopped.
 `distill check` prints sizes and checks of everything distilled, without text.
+
+Who I am (`SELF.md`, or the packaged default) is written by hand and kept
+short. A model-written portrait was tried and measurably hurt style; only the
+facts are distilled.
 
 ## Evaluate
 

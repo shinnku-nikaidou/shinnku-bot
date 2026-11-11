@@ -309,7 +309,7 @@ def _distill_self(settings: Settings, args: argparse.Namespace) -> int:
         facts = distill.load_facts(out_dir, chunks)
         year = time.gmtime(kept[-1].ts).tm_year
         result = asyncio.run(
-            distill.merge_self(
+            distill.merge_facts(
                 _distill_model(settings, slow=True),
                 facts,
                 settings.persona_dir,
@@ -318,7 +318,7 @@ def _distill_self(settings: Settings, args: argparse.Namespace) -> int:
             )
         )
         print(f"merge: {result}")
-        print("drafts written: SELF.draft.md, FACTS.draft.md, probes.jsonl (review, then `distill publish`)")
+        print("written: FACTS.draft.md and probes.jsonl (review the draft, then `distill publish`)")
     return 0
 
 
@@ -396,7 +396,7 @@ def _distill_publish(settings: Settings, args: argparse.Namespace) -> int:
     if problems:
         print(f"not published: {problems}")
         return 1
-    print("published: SELF.md and FACTS.md are live (previous versions kept as .bak)")
+    print("published: FACTS.md is live (the previous version is kept as FACTS.md.bak)")
     return 0
 
 
@@ -724,7 +724,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     distill_cmd = corpus_sub.add_parser("distill", help="distil who I am, the people and the groups")
     distill_sub = distill_cmd.add_subparsers(dest="distill_command", required=True)
-    self_cmd = distill_sub.add_parser("self", help="draft SELF.md and FACTS.md from what I said about myself")
+    self_cmd = distill_sub.add_parser("self", help="draft FACTS.md from what I said about myself")
     self_cmd.add_argument("--limit", type=int, default=12000, help="most self-statements to read")
     self_cmd.add_argument("--only", choices=["extract", "merge"], help="run one half of the job")
     people_cmd = distill_sub.add_parser("people", help="one card per person I talk to most")
@@ -766,7 +766,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_cmd.add_argument("--no-recall", action="store_true")
     run_cmd.add_argument("--no-anchor", action="store_true")
     run_cmd.add_argument("--judge", action="store_true", help="also ask a model which reply is real")
-    run_cmd.add_argument("--draft", action="store_true", help="use SELF.draft.md and FACTS.draft.md")
+    run_cmd.add_argument("--draft", action="store_true", help="use FACTS.draft.md, not the live facts")
     run_cmd.set_defaults(func=_corpus(_eval_run))
     recall_cmd = eval_sub.add_parser("recall", help="offline check of what recall surfaces")
     recall_cmd.add_argument("--n", type=int, default=100)
@@ -789,7 +789,7 @@ def build_parser() -> argparse.ArgumentParser:
     style_cmd.add_argument("--seed", type=int, default=0)
     style_cmd.set_defaults(func=_corpus(_eval_style))
     facts_cmd = eval_sub.add_parser("facts", help="ask the bot the facts of my life")
-    facts_cmd.add_argument("--draft", action="store_true", help="use SELF.draft.md and FACTS.draft.md")
+    facts_cmd.add_argument("--draft", action="store_true", help="use FACTS.draft.md, not the live facts")
     facts_cmd.add_argument("--concurrency", type=int, default=4)
     facts_cmd.set_defaults(func=_corpus(_eval_facts))
     urge_cmd = eval_sub.add_parser("urge", help="does the model speak where I spoke, uncalled")

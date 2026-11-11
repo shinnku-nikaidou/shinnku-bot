@@ -31,7 +31,6 @@ TOKENS_PER_CHAR = 0.67
 SESSION_GAP_S = 30 * 60
 CATEGORIES = ("身份", "生活", "工作学习", "设备", "爱好", "观点", "习惯", "关系")
 SECTION_LINES = {"身份": 8, "生活": 14, "工作学习": 12, "设备": 10, "爱好": 14, "观点": 14, "习惯": 10, "关系": 8}
-SELF_MAX_TOKENS = 1500
 FACTS_MAX_TOKENS = 3500
 CARD_MAX_TOKENS = 220
 GROUP_MAX_TOKENS = 450
@@ -344,7 +343,6 @@ def load_facts(out_dir: Path, chunks: Sequence[str] | None = None) -> list[dict[
 # -- me: merging --------------------------------------------------------------
 
 SECTION_TOOL = _tool("write_section", "写下整理好的清单。", {"lines": {"type": "array", "items": {"type": "string"}}})
-SELF_TOOL = _tool("write_self", "写下这段自我认识。", {"text": {"type": "string"}})
 PROBE_TOOL = _tool(
     "write_probes",
     "写下小测验。",
@@ -371,16 +369,7 @@ SECTION_SYSTEM = """下面是关于同一个人的一批事实，都是第一人
 - 只在较早年份出现过一次、现在多半已经变了的，丢掉。
 - 每条一句话，第一人称，以「我」开头，不带年份前缀（需要时把年份写进句子里）。
 - 最多 {limit} 条，重要的、近期的优先。"""
-SELF_SYSTEM = """下面是一个人关于自己的事实清单，都是第一人称。请替他写一段自我认识，调用 write_self。
-
-要求：
-- 全程第一人称，像他在心里对自己说的话，不是给别人看的简介。
-- 分五小段，段与段之间空一行，不要标题和列表符号：我是谁；我跟人相处的方式；我在意什么；我不掺和什么；有人说我是机器人、说我不是本人的时候，我会怎么反应（按清单里看得出的性格，用我平时的方式带过去，不长篇解释）。
-- 只根据清单里有的写，不编造。
-- 不写说话风格的规定，比如字数和标点。
-- 不出现「扮演」「模仿」「人设」「提示词」这类词，不用第二人称。
-- 600 字以内。"""
-PROBE_SYSTEM = """下面是一个人关于自己的事实清单。请出 {count} 道小测验，调用 write_probes。
+PROBE_SYSTEM ="""下面是一个人关于自己的事实清单。请出 {count} 道小测验，调用 write_probes。
 
 要求：
 - 每道题是朋友在聊天里会随口问他的一句话，口语、简短，答案能直接从清单的某一条里找到。
@@ -421,7 +410,7 @@ def clean_probes(raw: Any) -> list[dict[str, Any]]:
     return probes
 
 
-async def merge_self(
+async def merge_facts(
     model: ChatModel,
     facts: Sequence[dict[str, Any]],
     persona_dir: Path,
@@ -429,7 +418,12 @@ async def merge_self(
     probe_count: int = 30,
     progress: Progress = lambda line: None,
 ) -> dict[str, Any]:
-    """Write FACTS.draft.md, SELF.draft.md and probes.jsonl. Returns sizes and checks."""
+    """Write FACTS.draft.md and probes.jsonl. Returns sizes and checks.
+
+    Only facts are distilled. A model-written portrait of me was tried in place
+    of the hand-written SELF text and dropped: with it my replies turned long
+    and written, and a classifier told them from mine far more easily.
+    """
     usable = [fact for fact in facts if not fact["sensitive"]]
     year = as_of_year or max((fact["year"] for fact in usable), default=time.gmtime().tm_year)
     sections: dict[str, list[str]] = {}
@@ -452,17 +446,13 @@ async def merge_self(
     facts_text = "\n\n".join(
         f"{category}：\n" + "\n".join(f"- {line}" for line in lines) for category, lines in sections.items()
     )
-    self_text = ""
     probes: list[dict[str, Any]] = []
     if facts_text:
-        args = await ask(model, SELF_SYSTEM, facts_text, SELF_TOOL)
-        self_text = str(args.get("text", "")).strip() if args else ""
         args = await ask(model, PROBE_SYSTEM.format(count=probe_count), facts_text, PROBE_TOOL)
         probes = clean_probes(args.get("probes") if args else None)[:probe_count]
 
     persona_dir.mkdir(parents=True, exist_ok=True)
     (persona_dir / "FACTS.draft.md").write_text(facts_text + "\n", encoding="utf-8")
-    (persona_dir / "SELF.draft.md").write_text(self_text + "\n", encoding="utf-8")
     with (persona_dir / "probes.jsonl").open("w", encoding="utf-8") as handle:
         for probe in probes:
             handle.write(json.dumps(probe, ensure_ascii=False) + "\n")
@@ -470,11 +460,9 @@ async def merge_self(
         "facts_in": len(facts),
         "sensitive_dropped": len(facts) - len(usable),
         "fact_lines": sum(len(lines) for lines in sections.values()),
-        "facts_tokens": estimate_tokens(facts_text),
-        "self_tokens": estimate_tokens(self_text),
+        "tokens": estimate_tokens(facts_text),
         "probes": len(probes),
-        "facts_problems": lint(facts_text, FACTS_MAX_TOKENS),
-        "self_problems": lint(self_text, SELF_MAX_TOKENS),
+        "problems": lint(facts_text, FACTS_MAX_TOKENS),
     }
 
 
@@ -489,15 +477,10 @@ def check_persona(persona_dir: Path) -> dict[str, Any]:
             return ""
 
     report: dict[str, Any] = {}
-    for name, limit in (
-        ("SELF.draft.md", SELF_MAX_TOKENS),
-        ("FACTS.draft.md", FACTS_MAX_TOKENS),
-        ("SELF.md", SELF_MAX_TOKENS),
-        ("FACTS.md", FACTS_MAX_TOKENS),
-    ):
+    for name in ("FACTS.draft.md", "FACTS.md"):
         text = read(name)
         if text:
-            report[name] = {"tokens": estimate_tokens(text), "problems": lint(text, limit)}
+            report[name] = {"tokens": estimate_tokens(text), "problems": lint(text, FACTS_MAX_TOKENS)}
     for folder, limit in (("people", CARD_MAX_TOKENS), ("groups", GROUP_MAX_TOKENS)):
         cards = [p.read_text(encoding="utf-8") for p in (persona_dir / folder).rglob("*.md")]
         if cards:
@@ -509,30 +492,20 @@ def check_persona(persona_dir: Path) -> dict[str, Any]:
     return report
 
 
-def publish(persona_dir: Path) -> dict[str, list[str]]:
-    """Make the reviewed drafts live. Returns the problems that stopped a file, if any."""
-    persona_dir = Path(persona_dir)
-    problems: dict[str, list[str]] = {}
-    pending: list[tuple[Path, Path]] = []
-    for name, limit in (("SELF", SELF_MAX_TOKENS), ("FACTS", FACTS_MAX_TOKENS)):
-        draft = persona_dir / f"{name}.draft.md"
-        try:
-            text = draft.read_text(encoding="utf-8")
-        except OSError:
-            problems[name] = ["no_draft"]
-            continue
-        found = lint(text, limit)
-        if found:
-            problems[name] = found
-        else:
-            pending.append((draft, persona_dir / f"{name}.md"))
+def publish(persona_dir: Path) -> list[str]:
+    """Make the reviewed facts draft live. Returns the problems that stopped it, if any."""
+    draft, live = Path(persona_dir) / "FACTS.draft.md", Path(persona_dir) / "FACTS.md"
+    try:
+        text = draft.read_text(encoding="utf-8")
+    except OSError:
+        return ["no_draft"]
+    problems = lint(text, FACTS_MAX_TOKENS)
     if problems:
         return problems
-    for draft, live in pending:
-        if live.is_file():
-            shutil.copyfile(live, live.with_suffix(".md.bak"))
-        shutil.copyfile(draft, live)
-    return {}
+    if live.is_file():
+        shutil.copyfile(live, live.with_suffix(".md.bak"))
+    shutil.copyfile(draft, live)
+    return []
 
 
 # -- people -------------------------------------------------------------------

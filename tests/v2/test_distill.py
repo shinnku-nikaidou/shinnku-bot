@@ -147,58 +147,54 @@ class SelfDistillTests(Tmp):
         self.assertEqual((reused, done, failed), (0, 0, 12))
         self.assertEqual(len(model.calls), distill.GIVE_UP_AFTER)
 
-    def test_merge_writes_drafts(self) -> None:
+    def test_merge_writes_the_facts_draft(self) -> None:
         model = ToolModel(
             write_section=lambda text: {"lines": ["- " + line.split("  ", 1)[1] for line in text.splitlines()]},
-            write_self={"text": "我是个住在杭州的人。\n\n我跟朋友说话比较随意。"},
             write_probes={"probes": [{"question": "你住哪", "keywords": ["杭州"]}, {"question": "", "keywords": []}]},
         )
-        result = asyncio.run(distill.merge_self(model, self.FACTS, self.tmp, as_of_year=2025))
+        result = asyncio.run(distill.merge_facts(model, self.FACTS, self.tmp, as_of_year=2025))
 
         facts = (self.tmp / "FACTS.draft.md").read_text(encoding="utf-8")
         self.assertEqual(facts, "生活：\n- 我住在杭州\n\n设备：\n- 我用台式机\n")
         self.assertNotIn("门牌", "".join(model.asked("write_section")))
         self.assertIn("现在是 2025 年", model.calls[0][1])
-        text = (self.tmp / "SELF.draft.md").read_text(encoding="utf-8")
-        self.assertEqual(text, "我是个住在杭州的人。\n\n我跟朋友说话比较随意。\n")  # nothing about style is added
         self.assertEqual(load_probes(self.tmp / "probes.jsonl"), [{"question": "你住哪", "keywords": ["杭州"]}])
         self.assertEqual(
             (result["facts_in"], result["sensitive_dropped"], result["fact_lines"], result["probes"]), (3, 1, 2, 1)
         )
-        self.assertEqual((result["facts_problems"], result["self_problems"]), ([], []))
+        self.assertEqual(result["problems"], [])
+        self.assertEqual(sorted(p.name for p in self.tmp.iterdir()), ["FACTS.draft.md", "probes.jsonl"])
 
     def test_merge_with_nothing_to_say(self) -> None:
-        result = asyncio.run(distill.merge_self(ToolModel(), self.FACTS, self.tmp))
+        result = asyncio.run(distill.merge_facts(ToolModel(), self.FACTS, self.tmp))
         self.assertEqual(result["fact_lines"], 0)
-        self.assertEqual(result["self_problems"], ["empty"])
+        self.assertEqual(result["problems"], ["empty"])
 
     def test_publish(self) -> None:
-        self.assertEqual(distill.publish(self.tmp), {"SELF": ["no_draft"], "FACTS": ["no_draft"]})
-        (self.tmp / "SELF.draft.md").write_text("我是我。\n", encoding="utf-8")
+        self.assertEqual(distill.publish(self.tmp), ["no_draft"])
         (self.tmp / "FACTS.draft.md").write_text("你是一个机器人\n", encoding="utf-8")
-        self.assertEqual(distill.publish(self.tmp), {"FACTS": ["framing_words:1"]})
-        self.assertFalse((self.tmp / "SELF.md").exists())  # nothing goes live unless everything may
+        self.assertEqual(distill.publish(self.tmp), ["framing_words:1"])
+        self.assertFalse((self.tmp / "FACTS.md").exists())
 
         (self.tmp / "FACTS.draft.md").write_text("我住在杭州\n", encoding="utf-8")
-        self.assertEqual(distill.publish(self.tmp), {})
+        self.assertEqual(distill.publish(self.tmp), [])
         self.assertEqual(Persona(self.tmp).facts_text(), "我住在杭州")
-        (self.tmp / "SELF.draft.md").write_text("我还是我。\n", encoding="utf-8")
+        (self.tmp / "FACTS.draft.md").write_text("我搬到上海了\n", encoding="utf-8")
         distill.publish(self.tmp)
-        self.assertEqual((self.tmp / "SELF.md.bak").read_text(encoding="utf-8"), "我是我。\n")
-        self.assertEqual(Persona(self.tmp).self_text(), "我还是我。")
+        self.assertEqual((self.tmp / "FACTS.md.bak").read_text(encoding="utf-8"), "我住在杭州\n")
+        self.assertEqual(Persona(self.tmp).facts_text(), "我搬到上海了")
 
         report = distill.check_persona(self.tmp)
-        self.assertEqual(report["SELF.md"], {"tokens": 3, "problems": []})
+        self.assertEqual(report["FACTS.md"], {"tokens": 4, "problems": []})
         self.assertNotIn("people", report)
 
     def test_draft_persona(self) -> None:
-        (self.tmp / "SELF.md").write_text("我是线上的我", encoding="utf-8")
-        self.assertEqual(DraftPersona(self.tmp).self_text(), "我是线上的我")
-        (self.tmp / "SELF.draft.md").write_text("我是草稿里的我", encoding="utf-8")
-        (self.tmp / "FACTS.draft.md").write_text("我住在杭州", encoding="utf-8")
-        self.assertEqual(DraftPersona(self.tmp).self_text(), "我是草稿里的我")
+        (self.tmp / "FACTS.md").write_text("我住在杭州", encoding="utf-8")
         self.assertEqual(DraftPersona(self.tmp).facts_text(), "我住在杭州")
-        self.assertEqual(Persona(self.tmp).facts_text(), "")
+        (self.tmp / "FACTS.draft.md").write_text("我搬到上海了", encoding="utf-8")
+        self.assertEqual(DraftPersona(self.tmp).facts_text(), "我搬到上海了")
+        self.assertEqual(Persona(self.tmp).facts_text(), "我住在杭州")
+        self.assertEqual(DraftPersona(self.tmp).self_text(), Persona(self.tmp).self_text())
 
 
 class PeopleTests(Tmp):

@@ -65,16 +65,10 @@ class _NoAnchor(Persona):
 
 
 class DraftPersona(Persona):
-    """Reads the drafts awaiting review instead of the live SELF.md and FACTS.md."""
-
-    def _draft(self, name: str) -> str:
-        return self._read(self.dir / f"{name}.draft.md")
-
-    def self_text(self) -> str:
-        return self._draft("SELF") or super().self_text()
+    """Reads the facts draft awaiting review instead of the live FACTS.md."""
 
     def facts_text(self) -> str:
-        return self._draft("FACTS") or super().facts_text()
+        return self._read(self.dir / "FACTS.draft.md") or super().facts_text()
 
 
 class _Recorder:
