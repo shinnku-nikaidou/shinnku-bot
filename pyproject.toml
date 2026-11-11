@@ -5,32 +5,22 @@ description = "A Telegram bot with various features"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "python-dotenv>=1.2.2",
+    "python-dotenv>=1.2.4",
     "python-telegram-bot>=22.8",
-    "torch>=2.12.0",
-    "torchvision>=0.27.0",
-    "torchaudio>=2.11.0",
-    "httpx>=0.28.1",
-    "pyyaml>=6.0.3",
-    "scipy>=1.17.1",
-    "pandas>=3.0.3",
-    "matplotlib>=3.11.0",
-    "sympy>=1.14.0",
-    "cryptography>=49.0.0",
-    "pillow>=12.2.0",
-    "ipython>=9.14.1",
-    "black>=26.5.1",
-    "openai>=2.41.1",
-    "telethon>=1.44.0",
-    "telegramify-markdown>=1.2.0",
+    "openai>=3.49.0",
+    "fastembed>=0.9.1",
+    "numpy>=2.5.4",
 ]
+
+[project.scripts]
+shinnku = "shinnku_bot.cli:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src"]
+packages = ["src/shinnku_bot"]
 
 [tool.uv]
 dev-dependencies = []

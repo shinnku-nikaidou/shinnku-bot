@@ -1,0 +1,9 @@
+[Unit]
+Description=shinnku bot: write yesterday's diary for each group
+
+[Service]
+Type=oneshot
+User=shinnku
+Group=shinnku
+WorkingDirectory=/home/shinnku/codes/shinnku-bot
+ExecStart=/home/shinnku/codes/shinnku-bot/.venv/bin/shinnku memory digest
