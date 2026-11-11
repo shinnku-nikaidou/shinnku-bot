@@ -61,11 +61,12 @@ class Tmp(unittest.TestCase):
 
 class LintTests(unittest.TestCase):
     def test_framing_words_are_refused(self) -> None:
-        for text in ("你是一个幽默的人", "请你保持简短", "我在扮演一个人", "按这个人设回复用户"):
+        for text in ("你是一个幽默的人", "请你保持简短", "你要多用口语", "按这个风格回复用户"):
             self.assertTrue(any(p.startswith("framing") for p in distill.lint(text, 1000)), text)
 
     def test_ordinary_facts_pass(self) -> None:
         self.assertEqual(distill.lint("我是 Fedora 用户，平时喜欢折腾 AI 和模型", 1000), [])
+        self.assertEqual(distill.lint("我写过聊天机器人，也爱玩角色扮演游戏，会调提示词", 1000), [])
 
     def test_size_and_emptiness(self) -> None:
         self.assertEqual(distill.lint("", 10), ["empty"])

@@ -32,23 +32,18 @@ SESSION_GAP_S = 30 * 60
 CATEGORIES = ("身份", "生活", "工作学习", "设备", "爱好", "观点", "习惯", "关系")
 SECTION_LINES = {"身份": 8, "生活": 14, "工作学习": 12, "设备": 10, "爱好": 14, "观点": 14, "习惯": 10, "关系": 8}
 SELF_MAX_TOKENS = 1500
-FACTS_MAX_TOKENS = 3000
+FACTS_MAX_TOKENS = 3500
 CARD_MAX_TOKENS = 220
 GROUP_MAX_TOKENS = 450
 GIVE_UP_AFTER = 5
 
 _FIRST_PERSON = re.compile(r"我|俺|咱|本人")
-# Wording that would tell the model it is playing a part rather than being me.
+# Wording that addresses the model as someone following instructions, rather than
+# being me. Topic words (bots, prompts, role-play games) are not listed: I talk
+# about those things, so they turn up in honest facts about me.
 _FRAMING = [
-    re.compile(pattern, re.IGNORECASE)
+    re.compile(pattern)
     for pattern in (
-        r"扮演",
-        r"模仿",
-        r"人设",
-        r"提示词",
-        r"语言模型",
-        r"(?:AI|智能|聊天)\s*助手",
-        r"聊天机器人",
         r"(?:回复|回答|面对|对)用户",
         r"用户(?:说|问|提|发)",
         r"你(?:是|要|应该|必须|需要|的任务)",
