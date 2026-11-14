@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import random
@@ -58,6 +59,10 @@ BATCH = 6
 PER_ASKER = 3
 # Messages in one turn, within Telegram's 20 a minute in a group.
 TURN_MESSAGES = 12
+# A question whose turn failed this many times is dropped.
+MAX_TRIES = 3
+# The longest I wait when the gateway says how long to wait.
+RETRY_AFTER_MAX_S = 60.0
 
 
 @dataclass(frozen=True)
@@ -80,6 +85,7 @@ class Ask:
     reason: str
     arrived: float
     taken: bool = False  # in the turn under way
+    tries: int = 0  # turns that failed with it
 
 
 @dataclass
@@ -92,6 +98,8 @@ class _Chat:
     # The moment I might join in uncalled, and when it began.
     urge: Msg | None = None
     urge_since: float = 0.0
+    # After a failed turn, the next one waits until this.
+    retry_at: float = 0.0
     task: asyncio.Task | None = None
 
 
@@ -140,6 +148,8 @@ class Harness:
         self._tz = ZoneInfo(settings.timezone)
         self._chats: dict[int, _Chat] = {}
         self._closing = False
+        # The gateway turned me away and said how long: every chat waits until then.
+        self._hold_until = 0.0
 
     # -- perceive ---------------------------------------------------------
 
@@ -208,21 +218,36 @@ class Harness:
         A turn under way is never cancelled; whatever arrives meanwhile waits for the next.
         """
         try:
-            while True:
+            while chat.asks or (chat.urge is not None and not self._closing):
+                await self._held(chat)
                 if chat.asks:
                     await self._quiet(chat, chat.asks[0].arrived)
-                    await self._turn(chat_id, chat, self._take(chat))
-                elif chat.urge is not None and not self._closing:
-                    await self._quiet(chat, chat.urge_since)
-                    if chat.asks or chat.urge is None:
-                        continue
-                    chat.urge = None
-                    if self._urge(chat_id):
-                        await self._turn(chat_id, chat, [])
-                else:
-                    return
+                    self._expire(chat_id, chat)
+                    if chat.asks:
+                        await self._turn(chat_id, chat, self._take(chat))
+                    continue
+                await self._quiet(chat, chat.urge_since)
+                if chat.asks or chat.urge is None:
+                    continue
+                chat.urge = None
+                if self._urge(chat_id):
+                    await self._turn(chat_id, chat, [])
         finally:
             chat.task = None
+
+    async def _held(self, chat: _Chat) -> None:
+        """Wait out a failed turn's pause, and any hold the gateway asked for."""
+        loop = asyncio.get_running_loop()
+        while (wait := max(chat.retry_at, self._hold_until) - loop.time()) > 0:
+            await asyncio.sleep(wait)
+
+    def _expire(self, chat_id: int, chat: _Chat) -> None:
+        """Drop the questions that have waited too long: the chat has moved on."""
+        clock = asyncio.get_running_loop().time()
+        for ask in chat.asks:
+            if clock - ask.arrived > self.settings.ask_ttl_s:
+                log.warning("ask dropped chat=%s id=%s why=expired", chat_id, ask.msg.message_id)
+        chat.asks = [ask for ask in chat.asks if clock - ask.arrived <= self.settings.ask_ttl_s]
 
     async def _quiet(self, chat: _Chat, since: float) -> None:
         """Wait until the people I am waiting for stop typing, but no longer than max_wait."""
@@ -251,16 +276,32 @@ class Harness:
         return batch
 
     async def _turn(self, chat_id: int, chat: _Chat, batch: list[Ask]) -> None:
-        """One model call for `batch`. Whatever happens, those questions are done after it."""
+        """One model call for `batch`, after which those questions are done. If it fails,
+        they wait a little and go into another turn, up to MAX_TRIES."""
         try:
             await self._respond(chat_id, chat, batch)
         except Exception as exc:  # noqa: BLE001 - never let one chat kill the loop
+            wait = self._retry_in(exc, max((ask.tries for ask in batch), default=0) + 1)
             # The message may quote chat text, so only the type is logged.
-            log.error("respond failed chat=%s error=%s", chat_id, type(exc).__name__)
+            log.error("respond failed chat=%s error=%s retry_in=%.1fs", chat_id, type(exc).__name__, wait)
+            chat.retry_at = asyncio.get_running_loop().time() + wait
             for ask in batch:
-                log.warning("ask dropped chat=%s id=%s why=failed", chat_id, ask.msg.message_id)
-        finally:
-            chat.asks = [ask for ask in chat.asks if ask not in batch]
+                ask.tries += 1
+                ask.taken = False
+                if ask.tries >= MAX_TRIES:
+                    log.warning("ask dropped chat=%s id=%s why=failed", chat_id, ask.msg.message_id)
+            chat.asks = [ask for ask in chat.asks if ask.tries < MAX_TRIES]
+            return
+        chat.asks = [ask for ask in chat.asks if ask not in batch]
+
+    def _retry_in(self, exc: Exception, tries: int) -> float:
+        """How long to wait after a failed turn. A 429 holds every chat: the quota is the gateway's."""
+        wait = self.settings.retry_s * (1 if tries <= 1 else 3)
+        if getattr(exc, "status_code", None) == 429:
+            with contextlib.suppress(AttributeError, KeyError, TypeError, ValueError):
+                wait = min(float(exc.response.headers["retry-after"]), RETRY_AFTER_MAX_S)  # type: ignore[attr-defined]
+            self._hold_until = max(self._hold_until, asyncio.get_running_loop().time() + wait)
+        return wait
 
     async def drain(self, timeout: float = 60.0) -> None:
         """Answer what is already waiting before the process stops, so a restart neither
@@ -347,6 +388,8 @@ class Harness:
         latency = 0.0
         plain: dict[str, bool] = {}
         thought: list[int] = []  # reasoning tokens of each try
+        loop = asyncio.get_running_loop()
+        started = loop.time()
         for attempt in range(2):
             messages = build_messages(
                 self.persona.self_text(),
@@ -361,8 +404,14 @@ class Harness:
             )
             if messages is None:
                 return Outcome("nothing")
+            # The first call gets call_timeout_s; a second one, what is left of the turn.
+            budget = (
+                self.settings.call_timeout_s
+                if attempt == 0
+                else self.settings.turn_timeout_s - (loop.time() - started)
+            )
             try:
-                reply = await self.model.complete(messages, TOOLS, **plain)
+                reply = await asyncio.wait_for(self.model.complete(messages, TOOLS, **plain), budget)
             except TimeoutError:
                 # Thinking for too long gets the same second chance as thinking to no end.
                 if attempt or plain:

@@ -15,21 +15,26 @@ from shinnku_bot.llm import ChatModel, FallbackModel, GatewayModel
 from shinnku_bot.store import Store
 
 
-def gateway_model(settings: Settings, model: str = "") -> GatewayModel:
+def gateway_model(settings: Settings, model: str = "", max_retries: int = 1) -> GatewayModel:
     return GatewayModel(
         settings.llm_base_url,
         settings.llm_api_key,
         model or settings.llm_model,
         thinking=settings.llm_thinking,
         timeout_s=settings.llm_timeout_s,
+        max_retries=max_retries,
     )
 
 
 def live_model(settings: Settings) -> ChatModel:
-    """The chat model, and the backup behind it when one is set. Evaluations keep to the chat model."""
+    """The chat model, and the backup behind it when one is set. Evaluations keep to the chat model.
+
+    No SDK retries: the harness decides when to try again.
+    """
+    main = gateway_model(settings, max_retries=0)
     if not settings.llm_model_fallback:
-        return gateway_model(settings)
-    return FallbackModel(gateway_model(settings), gateway_model(settings, settings.llm_model_fallback))
+        return main
+    return FallbackModel(main, gateway_model(settings, settings.llm_model_fallback, max_retries=0))
 
 
 def build_harness(
@@ -56,7 +61,7 @@ def build_harness(
         if settings.llm_model_fallback:
             # The chat model may not take pictures, and a refused picture would hand
             # every reply to the backup for a while; the backup looks at them instead.
-            kwargs.setdefault("look_model", gateway_model(settings, settings.llm_model_fallback))
+            kwargs.setdefault("look_model", gateway_model(settings, settings.llm_model_fallback, max_retries=0))
     return Harness(
         settings,
         store,

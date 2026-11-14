@@ -72,6 +72,9 @@ class GatewayModel:
         # Thinking counts against this too. At 1024 the model now and then spent it
         # all on thinking and never got to speak.
         max_tokens: int = 8192,
+        # The SDK's own retries. The live bot sets 0: on a 429 the SDK first waits out
+        # retry-after, hidden inside one call, where the bot cannot see or bound it.
+        max_retries: int = 1,
     ) -> None:
         self.model = model
         self.thinking = thinking
@@ -82,7 +85,7 @@ class GatewayModel:
             api_key=api_key,
             default_headers={"x-api-key": api_key},
             timeout=timeout_s,
-            max_retries=1,
+            max_retries=max_retries,
         )
 
     def request_kwargs(
@@ -140,7 +143,8 @@ class FallbackModel:
     """The main model, with a backup that takes over for FALLBACK_S once the main one fails.
 
     Any gateway error counts: quota gone, key refused, gateway down. A timeout does
-    not; the caller already retries those without thinking.
+    not; the caller already retries those without thinking. When the backup fails
+    too, the main model gets one more try: the quota rolls, so it may be back.
     """
 
     def __init__(
@@ -154,7 +158,8 @@ class FallbackModel:
     async def complete(
         self, messages: list[dict[str, Any]], tools: list[dict[str, Any]], *, thinking: bool | None = None
     ) -> ModelReply:
-        if self._clock() >= self._main_from:
+        tried_main = self._clock() >= self._main_from
+        if tried_main:
             try:
                 return await self.main.complete(messages, tools, thinking=thinking)
             except APIError as exc:
@@ -166,4 +171,16 @@ class FallbackModel:
                     FALLBACK_S // 60,
                 )
                 self._main_from = self._clock() + FALLBACK_S
-        return await self.backup.complete(messages, tools, thinking=thinking)
+        try:
+            return await self.backup.complete(messages, tools, thinking=thinking)
+        except APIError as exc:
+            if tried_main:
+                raise
+            log.warning(
+                "backup failed (%s %s); trying the main model",
+                type(exc).__name__,
+                getattr(exc, "status_code", ""),
+            )
+        reply = await self.main.complete(messages, tools, thinking=thinking)
+        self._main_from = 0.0  # it is back
+        return reply

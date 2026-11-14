@@ -53,6 +53,14 @@ class Settings:
     # Debounce: wait for the other person to stop typing.
     quiet_window_s: float = 2.5
     max_wait_s: float = 8.0
+    # A turn's first call may take this long; a retry without thinking gets the rest of the turn.
+    call_timeout_s: float = 40.0
+    turn_timeout_s: float = 60.0
+    # A question still unanswered after this long is dropped.
+    ask_ttl_s: float = 300.0
+    # After a failed turn, wait this long (three times as long after the second failure),
+    # unless the gateway says how long.
+    retry_s: float = 10.0
     # How many people cards and how many days of diary go into a reply.
     people_cards: int = 4
     diary_days: int = 3

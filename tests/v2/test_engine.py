@@ -13,7 +13,7 @@ import httpx
 from openai import AsyncOpenAI, RateLimitError
 
 from shinnku_bot.harness.engine import Harness
-from shinnku_bot.harness.factory import build_harness, live_model
+from shinnku_bot.harness.factory import build_harness, gateway_model, live_model
 from shinnku_bot.harness.hooks import AI_TONE_NOTE
 from shinnku_bot.harness.persona import Persona
 from shinnku_bot.llm import FALLBACK_S, FallbackModel, GatewayModel, ModelReply
@@ -350,24 +350,68 @@ class DebounceTests(HarnessCase):
         self.assertEqual(self.model.calls, [])
         self.assertEqual(self.store.count(100), 1, "still recorded")
 
-    async def test_model_failure_does_not_wedge_the_chat(self) -> None:
-        class Flaky(FakeModel):
-            async def complete(self, messages, tools, **options):  # type: ignore[override]
-                if not self.calls:
-                    self.calls.append(messages)
-                    raise RuntimeError("gateway down")
-                return await super().complete(messages, tools)
 
-        harness = self.build(Flaky(say("在")))
+class FailureTests(HarnessCase):
+    QUOTA = RateLimitError(
+        "quota gone",
+        response=httpx.Response(
+            429,
+            headers={"retry-after": "0.15"},
+            request=httpx.Request("POST", "http://gateway.test/v1/chat/completions"),
+        ),
+        body=None,
+    )
+
+    async def test_a_failed_turn_is_tried_again(self) -> None:
+        harness = self.build(FakeModel(RuntimeError("gateway down"), say("在")), retry_s=0.05)
         with self.assertLogs("shinnku_bot.harness.engine", level="ERROR") as logs:
             harness.handle(msg(1, "真红"), "name")
             await self.settle(harness)
         self.assertIn("RuntimeError", logs.output[0])
         self.assertNotIn("gateway down", logs.output[0], "exception text is not logged")
-
-        harness.handle(msg(2, "真红？"), "name")
-        await self.settle(harness)
         self.assertEqual(self.outbox.texts, ["在"])
+
+    async def test_a_question_is_dropped_after_three_failed_turns(self) -> None:
+        harness = self.build(FakeModel(RuntimeError("gateway down")), retry_s=0.01)
+        with self.assertLogs("shinnku_bot.harness.engine", level="WARNING") as logs:
+            harness.handle(msg(1, "真红"), "name")
+            await self.settle(harness)
+        self.assertEqual(len(self.model.calls), 3)
+        self.assertIn("ask dropped chat=100 id=1 why=failed", logs.output[-1])
+
+    async def test_a_question_that_waited_too_long_is_dropped(self) -> None:
+        harness = self.build(FakeModel(RuntimeError("gateway down"), say("在")), retry_s=0.2, ask_ttl_s=0.1)
+        with self.assertLogs("shinnku_bot.harness.engine", level="WARNING") as logs:
+            harness.handle(msg(1, "真红"), "name")
+            await self.settle(harness)
+        self.assertEqual((len(self.model.calls), self.outbox.sent), (1, []))
+        self.assertIn("ask dropped chat=100 id=1 why=expired", logs.output[-1])
+
+    async def test_a_429_holds_every_chat_as_long_as_the_gateway_says(self) -> None:
+        class Timed(FakeModel):
+            async def complete(self, messages, tools, **options):  # type: ignore[override]
+                self.times.append(asyncio.get_running_loop().time())
+                return await super().complete(messages, tools, **options)
+
+        model = Timed(self.QUOTA, say("在"))
+        model.times = []
+        harness = self.build(model)
+        start = asyncio.get_running_loop().time()
+        harness.handle(msg(1, "真红"), "name")
+        await asyncio.sleep(0.05)  # the first call has failed with a 429
+        harness.handle(msg(1, "真红", chat_id=101), "name")
+        await self.settle(harness)
+        self.assertEqual(len(model.times), 3)
+        self.assertTrue(all(t - start >= 0.15 for t in model.times[1:]), "both chats waited out retry-after")
+        self.assertEqual(len(self.outbox.sent), 2)
+
+    async def test_a_hung_call_is_given_up_within_the_turn(self) -> None:
+        harness = self.build(FakeModel(say("在"), delay=5), call_timeout_s=0.05, turn_timeout_s=0.1)
+        start = asyncio.get_running_loop().time()
+        with self.assertRaises(TimeoutError):
+            await harness.answer(msg(1, "真红"), "name")
+        self.assertLess(asyncio.get_running_loop().time() - start, 0.5)
+        self.assertEqual(self.model.options, [{}, {"thinking": False}])
 
 
 class GatewayModelTests(unittest.IsolatedAsyncioTestCase):
@@ -481,6 +525,19 @@ class FallbackModelTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await model.complete([], []), say("主"))
         self.assertEqual(len(backup.calls), 2)
 
+    async def test_when_the_backup_fails_too_the_main_model_gets_another_try(self) -> None:
+        now = [0.0]
+        main, backup = FakeModel(self.QUOTA, say("主")), FakeModel(self.QUOTA)
+        model = FallbackModel(main, backup, clock=lambda: now[0])
+        with self.assertRaises(RateLimitError), self.assertLogs("shinnku_bot.llm", "WARNING"):
+            await model.complete([], [])  # the main model was just tried: nothing more to try
+
+        now[0] = 60.0  # the main model is resting, the backup fails: the main one is asked anyway
+        with self.assertLogs("shinnku_bot.llm", "WARNING"):
+            self.assertEqual(await model.complete([], []), say("主"))
+        self.assertEqual(await model.complete([], []), say("主"))
+        self.assertEqual((len(main.calls), len(backup.calls)), (3, 2), "it is back: no more detours")
+
     async def test_timeout_stays_with_the_caller(self) -> None:
         backup = FakeModel(say("备"))
         model = FallbackModel(FakeModel(TimeoutError()), backup)
@@ -494,6 +551,13 @@ class FallbackModelTests(unittest.IsolatedAsyncioTestCase):
             model = live_model(make_settings(Path(tmp), llm_model_fallback="codex/x"))
         self.assertIsInstance(model, FallbackModel)
         self.assertEqual((model.main.model, model.backup.model), ("test-model", "codex/x"))
+
+    def test_the_live_models_leave_retries_to_the_harness(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            settings = make_settings(Path(tmp), llm_model_fallback="codex/x")
+            model = live_model(settings)
+            self.assertEqual((model.main._client.max_retries, model.backup._client.max_retries), (0, 0))
+            self.assertEqual(gateway_model(settings)._client.max_retries, 1, "evaluations keep the SDK's retry")
 
     def test_the_backup_looks_at_pictures(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
