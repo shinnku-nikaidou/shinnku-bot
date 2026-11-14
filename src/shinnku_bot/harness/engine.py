@@ -26,10 +26,12 @@ from shinnku_bot.harness.hooks import (
     violations_of,
 )
 from shinnku_bot.harness.look import Check, Fetch, look
+from shinnku_bot.harness.lookup import Hit, Search, look_up
 from shinnku_bot.harness.persona import Persona
 from shinnku_bot.harness.prompt import (
     build_messages,
     render_around,
+    render_known,
     render_pending,
     scene_header,
 )
@@ -60,8 +62,8 @@ BATCH = 6
 PER_ASKER = 3
 # Messages in one turn, within Telegram's 20 a minute in a group.
 TURN_MESSAGES = 12
-# How much longer a turn waits for the exam checks, which started when the questions came in.
-EXAM_WAIT_S = 3.0
+# How much longer a turn waits for the exam checks and lookups, which started when the questions came in.
+CHECK_WAIT_S = 3.0
 # A question whose turn failed this many times is dropped.
 MAX_TRIES = 3
 # The longest I wait when the gateway says how long to wait.
@@ -91,11 +93,19 @@ class Ask:
     tries: int = 0  # turns that failed with it
     # Whether it is a question set to test me as an AI, judged from when it came in.
     exam: asyncio.Task[bool] | None = None
+    # What the web says about it, looked up from when it came in.
+    lookup: asyncio.Task[tuple[Hit, ...]] | None = None
 
     @property
     def is_exam(self) -> bool:
         """Judged an exam in time. A check still running or turned off counts as talk."""
         return self.exam is not None and self.exam.done() and not self.exam.cancelled() and self.exam.result()
+
+    @property
+    def found(self) -> tuple[Hit, ...]:
+        """What the lookup found in time; nothing while it runs."""
+        task = self.lookup
+        return task.result() if task is not None and task.done() and not task.cancelled() else ()
 
 
 @dataclass
@@ -134,6 +144,8 @@ class Harness:
         check: Check | None = None,
         # Looks at pictures; without it the chat model does.
         look_model: ChatModel | None = None,
+        # Looks things up on the web for the questions; without it I know what the model knows.
+        search: Search | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         rng: Callable[[], float] = random.random,
         now: Callable[[], float] = time.time,
@@ -152,6 +164,7 @@ class Harness:
         self.fetch = fetch
         self.check = check
         self.look_model = look_model or model
+        self.search = search
         self._sleep = sleep
         self._rng = rng
         self._now = now
@@ -213,9 +226,14 @@ class Harness:
         self._wake(msg.chat_id, chat)
 
     def _queue(self, chat_id: int, chat: _Chat, ask: Ask) -> None:
-        if self.settings.brush_off_exams:
-            # Judged while I wait for them to stop typing.
-            ask.exam = asyncio.get_running_loop().create_task(self._exam(ask.msg))
+        if self.settings.brush_off_exams or self.search is not None:
+            # Judged and looked up while I wait for them to stop typing.
+            loop = asyncio.get_running_loop()
+            replied, before = self._context(ask.msg)
+            if self.settings.brush_off_exams:
+                ask.exam = loop.create_task(is_exam(self.model, ask.msg, replied, before))
+            if self.search is not None:
+                ask.lookup = loop.create_task(look_up(self.model, self.search, ask.msg, replied, before))
         chat.asks.append(ask)
         chat.last_activity = ask.arrived
         chat.urge = None  # being called comes first
@@ -276,22 +294,20 @@ class Harness:
                 return
             await asyncio.sleep(wait)
 
-    async def _exam(self, msg: Msg) -> bool:
-        try:
-            replied = self.store.get(msg.chat_id, msg.reply_to) if msg.reply_to is not None else None
-            recent = self.store.recent(msg.chat_id, 8, self.settings.context_max_age_s, self._now())
-        except Exception as exc:  # noqa: BLE001 - without a verdict I answer as usual
-            log.warning("exam check failed chat=%s error=%s", msg.chat_id, type(exc).__name__)
-            return False
+    def _context(self, msg: Msg) -> tuple[Msg | None, list[Msg]]:
+        """What the quick checks see besides the message: what it replies to, the lines before it."""
+        replied = self.store.get(msg.chat_id, msg.reply_to) if msg.reply_to is not None else None
+        recent = self.store.recent(msg.chat_id, 8, self.settings.context_max_age_s, self._now())
         # Only what came before it: lines that arrived since are not its context.
-        before = [m for m in recent if m.message_id < msg.message_id][-3:]
-        return await is_exam(self.model, msg, replied, before)
+        return replied, [m for m in recent if m.message_id < msg.message_id][-3:]
 
     async def _judged(self, chat: _Chat) -> None:
-        """Give the exam checks of the waiting questions up to EXAM_WAIT_S more."""
-        running = [ask.exam for ask in chat.asks if ask.exam is not None and not ask.exam.done()]
+        """Give the exam checks and lookups of the waiting questions up to CHECK_WAIT_S more."""
+        running = [
+            task for ask in chat.asks for task in (ask.exam, ask.lookup) if task is not None and not task.done()
+        ]
         if running:
-            await asyncio.wait(running, timeout=EXAM_WAIT_S)
+            await asyncio.wait(running, timeout=CHECK_WAIT_S)
 
     def _take(self, chat: _Chat) -> list[Ask]:
         """This turn's questions: oldest first, a few per person; the rest wait.
@@ -419,6 +435,8 @@ class Harness:
         # Questions set to test me get brushed off, without thinking them over.
         exam = bool(asks) and all(ask.is_exam for ask in asks)
         base = [BRUSH_OFF] if exam else []
+        # An exam gets brushed off: what the web says about it does not matter.
+        known = [] if exam else list(dict.fromkeys(hit.line for ask in asks for hit in ask.found))
         notes = list(base)
         final: tuple[Line, ...] = ()
         violations: tuple[str, ...] = ()
@@ -440,6 +458,7 @@ class Harness:
                 facts=self.persona.facts_text(),
                 around=around,
                 pending=pending,
+                known=render_known(known),
             )
             if messages is None:
                 return Outcome("nothing")
@@ -487,7 +506,7 @@ class Harness:
         kind = "said" if said else "silent"
         log.info(
             "%s chat=%s why=%s exam=%s asks=%d listed=%s answered=%d left=%d n=%d lens=%s "
-            "recalled=%d tries=%d latency=%.1fs prompt_tok=%d cached=%d reasoning_tok=%s violations=%s",
+            "recalled=%d known=%d tries=%d latency=%.1fs prompt_tok=%d cached=%d reasoning_tok=%s violations=%s",
             kind,
             chat_id,
             why,
@@ -499,6 +518,7 @@ class Harness:
             len(said),
             [len(text) for text in said],
             len(recalled),
+            len(known),
             attempts,
             latency,
             reply.prompt_tokens,
@@ -506,7 +526,7 @@ class Harness:
             thought,
             list(violations),
         )
-        self._trace(chat_id, why, asks, turns, reply, said, violations, attempts)
+        self._trace(chat_id, why, asks, turns, known, reply, said, violations, attempts)
         outcome = Outcome(kind, said, violations, reply.reasoning, attempts, len(recalled))
         if unprompted and self.gate is not None:
             if said:
@@ -630,6 +650,7 @@ class Harness:
         why: str,
         asks: Sequence[Ask],
         turns: list[dict[str, str]],
+        known: list[str],
         reply: ModelReply,
         final: tuple[str, ...],
         violations: tuple[str, ...],
@@ -645,6 +666,7 @@ class Harness:
             "why": why,
             "asks": [ask.msg.message_id for ask in asks],
             "turns": turns,
+            "known": known,
             "reasoning": reply.reasoning,
             "said": list(final),
             "violations": list(violations),

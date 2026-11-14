@@ -102,6 +102,13 @@ with..."), are told apart by one small call with thinking off (`harness/exam.py`
 and the bot brushes them off without thinking. `BRUSH_OFF_EXAMS=off` turns
 this off.
 
+A question that turns on something the chat cannot tell (news, a score, a
+release, a name) is looked up on a local SearXNG while the bot waits for the
+asker to stop typing (`harness/lookup.py`). A few results go into the prompt as
+things it has seen, so the answer never says it searched. Start SearXNG as
+`deploy/searxng/compose.yml` says and set `SEARXNG_URL=http://127.0.0.1:8888`;
+without it nothing is looked up.
+
 ```bash
 uv run shinnku memory digest
 ```

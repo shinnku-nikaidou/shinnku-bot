@@ -9,6 +9,8 @@ search:
   # The bot reads results as JSON.
   formats: [html, json]
   safe_search: 0
+  # Left to guess, results come dated in the server's locale ("il y a 2 jours").
+  default_lang: zh-CN
 
 server:
   # One local client: no bot detection, no image proxy.

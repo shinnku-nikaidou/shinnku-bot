@@ -7,6 +7,7 @@ from typing import Any
 from shinnku_bot.config import Settings
 from shinnku_bot.corpus.stats import limits_from_fingerprint, pace_from_fingerprint
 from shinnku_bot.harness.engine import Harness
+from shinnku_bot.harness.lookup import SearXNG
 from shinnku_bot.harness.persona import Persona
 from shinnku_bot.harness.recall import load_recall
 from shinnku_bot.harness.send import Outbox
@@ -62,6 +63,8 @@ def build_harness(
             # The chat model may not take pictures, and a refused picture would hand
             # every reply to the backup for a while; the backup looks at them instead.
             kwargs.setdefault("look_model", gateway_model(settings, settings.llm_model_fallback, max_retries=0))
+    if settings.searxng_url:
+        kwargs.setdefault("search", SearXNG(settings.searxng_url))
     return Harness(
         settings,
         store,

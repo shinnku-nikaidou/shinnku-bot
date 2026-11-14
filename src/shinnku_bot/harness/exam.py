@@ -77,8 +77,8 @@ def _speaker(msg: Msg) -> str:
     return "shinnku" if msg.is_me else "某人"
 
 
-def exam_messages(msg: Msg, replied: Msg | None, before: Sequence[Msg]) -> list[dict[str, str]]:
-    """What the judge sees: a few lines before, what the message replies to, the message."""
+def context_text(msg: Msg, replied: Msg | None, before: Sequence[Msg]) -> str:
+    """A message as a quick judgement of it sees it: a few lines before, what it replies to, itself."""
     parts = []
     lines = [f"{_speaker(m)}: {_cut(render_body(m), MAX_BEFORE)}" for m in before[-BEFORE_LINES:]]
     if lines:
@@ -88,7 +88,11 @@ def exam_messages(msg: Msg, replied: Msg | None, before: Sequence[Msg]) -> list[
     # The whole text, line breaks kept: the layout of a pasted problem is part of what shows it.
     text = msg.text if msg.kind == "text" else render_body(msg)
     parts.append(f'这条消息：\n"""\n{_cut(text, MAX_TEXT)}\n"""')
-    return [{"role": "system", "content": PROMPT}, {"role": "user", "content": "\n\n".join(parts)}]
+    return "\n\n".join(parts)
+
+
+def exam_messages(msg: Msg, replied: Msg | None, before: Sequence[Msg]) -> list[dict[str, str]]:
+    return [{"role": "system", "content": PROMPT}, {"role": "user", "content": context_text(msg, replied, before)}]
 
 
 async def judge(model: ChatModel, msg: Msg, replied: Msg | None, before: Sequence[Msg]) -> bool:

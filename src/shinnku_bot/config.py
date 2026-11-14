@@ -38,6 +38,9 @@ class Settings:
     # Questions that test me as an AI rather than talk to me get a brush-off,
     # without thinking (harness/exam.py).
     brush_off_exams: bool = True
+    # SearXNG that questions are looked up on (harness/lookup.py, deploy/searxng).
+    # Empty means no lookups.
+    searxng_url: str = ""
     timezone: str = "Asia/Shanghai"
     data_dir: Path = Path("data")
     assets_dir: Path = Path("assets")
@@ -140,6 +143,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         allowed_chat_ids=frozenset(int(x) for x in _csv(env, "ALLOWED_CHAT_IDS")),
         allow_private=_flag(env, "ALLOW_PRIVATE", True),
         brush_off_exams=_flag(env, "BRUSH_OFF_EXAMS", True),
+        searxng_url=env.get("SEARXNG_URL", "").strip(),
         timezone=env.get("TIMEZONE", "").strip() or defaults["timezone"].default,
         data_dir=Path(env.get("DATA_DIR", "").strip() or "data"),
         assets_dir=Path(env.get("ASSETS_DIR", "").strip() or "assets"),

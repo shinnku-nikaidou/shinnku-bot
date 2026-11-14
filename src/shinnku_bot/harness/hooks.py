@@ -39,6 +39,9 @@ _AI_TONE = [
         r"为您|对您|您好",
         r"首先[，,：:].{0,80}其次",
         r"以下是",
+        # Citing what was looked up, which I never say I did.
+        r"(?:搜索|查询|检索)结果",
+        r"根据.{0,10}(?:搜索|资料|报道|信息|网上)",
     )
 ]
 

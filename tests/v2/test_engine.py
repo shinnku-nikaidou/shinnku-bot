@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 import httpx
 from openai import AsyncOpenAI, RateLimitError
@@ -16,7 +17,9 @@ from shinnku_bot.harness.engine import Harness
 from shinnku_bot.harness.exam import BRUSH_OFF
 from shinnku_bot.harness.factory import build_harness, gateway_model, live_model
 from shinnku_bot.harness.hooks import AI_TONE_NOTE
+from shinnku_bot.harness.lookup import Hit, Search
 from shinnku_bot.harness.persona import Persona
+from shinnku_bot.harness.prompt import KNOWN_INTRO
 from shinnku_bot.llm import FALLBACK_S, FallbackModel, GatewayModel, ModelReply, ToolCall
 from shinnku_bot.store import Store
 from shinnku_bot.tg.convert import to_msg
@@ -25,6 +28,7 @@ from tests.v2.fakes import (
     BOT_ID,
     FakeModel,
     FakeOutbox,
+    FakeSearch,
     make_settings,
     msg,
     no_sleep,
@@ -57,8 +61,23 @@ class ExamModel(FakeModel):
         return ModelReply(tool_calls=(ToolCall("judge", {"exam": verdict}),))
 
 
+class LookupModel(ExamModel):
+    """Asks to search for `query` when deciding what to look up; otherwise like ExamModel."""
+
+    def __init__(self, query: str, *replies: ModelReply, verdict: object = False) -> None:
+        super().__init__(verdict, *replies)
+        self.query = query
+        self.decided = 0
+
+    async def complete(self, messages, tools, **options):  # type: ignore[override]
+        if tools[0]["function"]["name"] != "decide":
+            return await super().complete(messages, tools, **options)
+        self.decided += 1
+        return ModelReply(tool_calls=(ToolCall("decide", {"query": self.query}),))
+
+
 class HarnessCase(unittest.IsolatedAsyncioTestCase):
-    def build(self, model: FakeModel, **overrides: object) -> Harness:
+    def build(self, model: FakeModel, search: Search | None = None, **overrides: object) -> Harness:
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.tmp = Path(tmp.name)
@@ -75,6 +94,7 @@ class HarnessCase(unittest.IsolatedAsyncioTestCase):
             Persona(settings.persona_dir),
             bot_id=BOT_ID,
             bot_username="akitsu_bot",
+            search=search,
             sleep=no_sleep,
             rng=lambda: 0.5,
         )
@@ -427,6 +447,60 @@ class ExamTests(HarnessCase):
         self.assertNotIn("阿树", model.calls[1][-2]["content"].split("还没回")[-1])
         self.assertIn("[1] 阿树: 真红 打游戏吗", model.calls[2][-1]["content"])
         self.assertEqual(self.outbox.texts, ["嗯", "滚", "来"])
+
+
+class LookupTests(HarnessCase):
+    """What a question turns on is looked up while I wait, and comes in as something I saw."""
+
+    HIT = Hit("钟馗 发售日", "八月", "2026-09-10")
+
+    async def test_what_the_web_says_comes_in_before_i_answer(self) -> None:
+        search = FakeSearch(self.HIT)
+        harness = self.build(LookupModel("钟馗 发售", say("八月吧")), search)
+        harness.handle(msg(1, "真红 钟馗啥时候出"), "name", title="测试群")
+        await self.settle(harness)
+        self.assertEqual((self.model.decided, search.queries), (1, ["钟馗 发售"]))
+        prompt = self.model.calls[0]
+        self.assertTrue(prompt[-1]["content"].endswith(f"（{KNOWN_INTRO}\n{self.HIT.line}）"))
+        self.assertNotIn(KNOWN_INTRO, prompt[0]["content"])
+        self.assertEqual(self.outbox.texts, ["八月吧"])
+
+    async def test_nothing_to_look_up_reads_as_before(self) -> None:
+        search = FakeSearch(self.HIT)
+        harness = self.build(LookupModel("", say("来")), search)
+        harness.handle(msg(1, "真红 打游戏吗"), "name", title="测试群")
+        await self.settle(harness)
+        self.assertEqual(search.queries, [])
+        self.assertNotIn(KNOWN_INTRO, json.dumps(self.model.calls[0], ensure_ascii=False))
+
+    async def test_a_failed_lookup_answers_as_usual(self) -> None:
+        harness = self.build(LookupModel("钟馗", say("不知道")), FakeSearch(error=RuntimeError("down")))
+        with self.assertLogs("shinnku_bot.harness.lookup", "WARNING"):
+            harness.handle(msg(1, "真红 钟馗啥时候出"), "name", title="测试群")
+            await self.settle(harness)
+        self.assertEqual(self.outbox.texts, ["不知道"])
+
+    async def test_a_slow_lookup_is_not_waited_for(self) -> None:
+        search = FakeSearch(self.HIT, delay=0.5)
+        harness = self.build(LookupModel("钟馗", say("不知道")), search)
+        with patch("shinnku_bot.harness.engine.CHECK_WAIT_S", 0.05):
+            harness.handle(msg(1, "真红 钟馗啥时候出"), "name", title="测试群")
+            await self.settle(harness)
+        self.assertNotIn(KNOWN_INTRO, json.dumps(self.model.calls[0], ensure_ascii=False))
+        self.assertEqual(self.outbox.texts, ["不知道"])
+
+    async def test_an_exam_is_brushed_off_without_it(self) -> None:
+        harness = self.build(LookupModel("钟馗", say("滚"), verdict=True), FakeSearch(self.HIT), brush_off_exams=True)
+        harness.handle(msg(1, "真红 证明钟馗八月发售"), "name", title="测试群")
+        await self.settle(harness)
+        self.assertEqual(self.model.calls[0][-1], {"role": "system", "content": BRUSH_OFF})
+        self.assertNotIn(KNOWN_INTRO, json.dumps(self.model.calls[0], ensure_ascii=False))
+
+    async def test_nothing_is_looked_up_without_a_search(self) -> None:
+        harness = self.build(LookupModel("钟馗", say("来")))
+        harness.handle(msg(1, "真红 钟馗啥时候出"), "name", title="测试群")
+        await self.settle(harness)
+        self.assertEqual(self.model.decided, 0)
 
 
 class FailureTests(HarnessCase):

@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from shinnku_bot.config import Settings
+from shinnku_bot.harness.lookup import Hit
 from shinnku_bot.llm import ModelReply, ToolCall
 from shinnku_bot.store import Msg
 
@@ -98,6 +99,24 @@ class ToolModel:
     def asked(self, name: str) -> list[str]:
         """The user texts sent with each call of this tool."""
         return [user for tool, _, user in self.calls if tool == name]
+
+
+class FakeSearch:
+    """Gives the same hits for every query, after `delay`; raises `error` if there is one."""
+
+    def __init__(self, *hits: Hit, error: Exception | None = None, delay: float = 0.0) -> None:
+        self.hits = list(hits)
+        self.error = error
+        self.delay = delay
+        self.queries: list[str] = []
+
+    async def __call__(self, query: str) -> list[Hit]:
+        self.queries.append(query)
+        if self.delay:
+            await asyncio.sleep(self.delay)
+        if self.error is not None:
+            raise self.error
+        return self.hits
 
 
 class FakeOutbox:
