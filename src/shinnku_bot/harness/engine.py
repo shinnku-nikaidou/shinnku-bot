@@ -7,8 +7,9 @@ import json
 import logging
 import random
 import time
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from collections import Counter
+from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass, field
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -18,10 +19,22 @@ from shinnku_bot.harness.attention import blocked
 from shinnku_bot.harness.hooks import RETRY_NOTES, StyleLimits, check
 from shinnku_bot.harness.look import Check, Fetch, look
 from shinnku_bot.harness.persona import Persona
-from shinnku_bot.harness.prompt import build_messages, render_around, scene_header
+from shinnku_bot.harness.prompt import (
+    build_messages,
+    render_around,
+    render_pending,
+    scene_header,
+)
 from shinnku_bot.harness.recall import Recall
 from shinnku_bot.harness.send import Outbox, Pace, send_burst
-from shinnku_bot.harness.transcript import clean_name, render_turns, tail_text
+from shinnku_bot.harness.transcript import (
+    Lookup,
+    clean_name,
+    render_body,
+    render_lines,
+    render_turns,
+    tail_text,
+)
 from shinnku_bot.harness.urge import Gate
 from shinnku_bot.llm import ChatModel, ModelReply
 from shinnku_bot.store import Msg, Store
@@ -30,8 +43,13 @@ log = logging.getLogger(__name__)
 
 # The reason recorded when nobody called me and I am only considering joining in.
 URGE = "urge"
+# A line from someone while I am answering them; it waits for the next turn.
+FOLLOWUP = "followup"
 # With more than this many newer lines from others, my answer quotes what it answers.
 QUOTE_AFTER = 4
+# Questions per turn, and per person per turn. The rest wait for the next turn.
+BATCH = 6
+PER_ASKER = 3
 
 
 @dataclass(frozen=True)
@@ -46,19 +64,27 @@ class Outcome:
     recalled: int = 0
 
 
+@dataclass(eq=False)
+class Ask:
+    """A message aimed at me, from when it arrives until a turn has answered or passed it."""
+
+    msg: Msg
+    reason: str
+    arrived: float
+    taken: bool = False  # in the turn under way
+
+
 @dataclass
 class _Chat:
     title: str | None = None
     is_private: bool = False
-    trigger: Msg | None = None
-    reason: str = ""
+    asks: list[Ask] = field(default_factory=list)  # oldest first
+    # When someone I am waiting for last spoke (anyone, while I only consider joining in).
     last_activity: float = 0.0
+    # The moment I might join in uncalled, and when it began.
+    urge: Msg | None = None
+    urge_since: float = 0.0
     task: asyncio.Task | None = None
-    generating: bool = False
-    # Set once I start sending; from then on a new message cannot cancel me.
-    committed: bool = False
-    restarts: int = 0
-    dirty: bool = False
 
 
 class Harness:
@@ -105,6 +131,7 @@ class Harness:
         self._now = now
         self._tz = ZoneInfo(settings.timezone)
         self._chats: dict[int, _Chat] = {}
+        self._closing = False
 
     # -- perceive ---------------------------------------------------------
 
@@ -116,7 +143,7 @@ class Harness:
         title: str | None = None,
         is_private: bool = False,
     ) -> None:
-        """Record a message and, if it is aimed at me, schedule a debounced answer.
+        """Record a message; queue it if it is aimed at me, else maybe consider joining in.
 
         Must be called from the running event loop.
         """
@@ -124,102 +151,120 @@ class Harness:
         chat = self._chats.setdefault(msg.chat_id, _Chat())
         chat.title, chat.is_private = title, is_private
         clock = asyncio.get_running_loop().time()
-        active = chat.task is not None and not chat.task.done()
         if self.gate is not None and msg.user_id == self.settings.owner_id:
             self.gate.owner_spoke(msg.chat_id, self._now())
 
-        if reason is None:
-            if active:
-                # Another line from the person I am about to answer: wait for them.
-                # While I am only considering joining in, anyone's line restarts the wait.
-                if chat.reason == URGE:
-                    if not chat.generating:
-                        chat.trigger, chat.last_activity = msg, clock
-                elif chat.trigger is not None and msg.user_id == chat.trigger.user_id:
-                    chat.last_activity = clock
-                    self._interrupt(msg.chat_id, chat)
+        if reason is not None:
+            deny = blocked(
+                self.settings, self.store.chat_state(msg.chat_id), msg.chat_id, is_private, self._now()
+            )
+            if deny is not None:
+                log.info("skip chat=%s why=%s", msg.chat_id, deny)
                 return
-            if self.gate is None or is_private or msg.is_bot or msg.is_me:
-                return
-            state = self.store.chat_state(msg.chat_id)
-            if state.talk_level <= 0 or blocked(
-                self.settings, state, msg.chat_id, is_private, self._now()
-            ):
-                return
-            chat.trigger, chat.reason, chat.last_activity = msg, URGE, clock
-            chat.restarts = 0
-            chat.dirty = False
-            chat.task = asyncio.get_running_loop().create_task(self._run(msg.chat_id, chat))
+            self._queue(msg.chat_id, chat, Ask(msg, reason, clock))
             return
 
-        deny = blocked(
-            self.settings, self.store.chat_state(msg.chat_id), msg.chat_id, is_private, self._now()
-        )
-        if deny is not None:
-            log.info("skip chat=%s why=%s", msg.chat_id, deny)
+        mine = [ask for ask in chat.asks if msg.user_id is not None and ask.msg.user_id == msg.user_id]
+        if any(ask.taken for ask in mine):
+            # More from someone I am answering right now. One follow-up each, the latest.
+            chat.asks = [ask for ask in chat.asks if ask.taken or ask.reason != FOLLOWUP or ask not in mine]
+            self._queue(msg.chat_id, chat, Ask(msg, FOLLOWUP, clock))
             return
-
-        chat.trigger, chat.reason, chat.last_activity = msg, reason, clock
-        if active:
-            self._interrupt(msg.chat_id, chat)
-        else:
-            chat.restarts = 0
-            chat.dirty = False
-            chat.task = asyncio.get_running_loop().create_task(self._run(msg.chat_id, chat))
-
-    def _interrupt(self, chat_id: int, chat: _Chat) -> None:
-        """A new message arrived while a run is in flight."""
-        if not chat.generating:
-            return  # Still waiting out the quiet window; the loop sees last_activity.
-        if chat.committed or chat.restarts >= 1:
-            chat.dirty = True  # Finish this answer, then look again.
+        if mine:
+            chat.last_activity = clock  # still typing their question: wait for them
             return
-        chat.restarts += 1
-        assert chat.task is not None
-        chat.task.cancel()
-        chat.generating = False
-        chat.task = asyncio.get_running_loop().create_task(self._run(chat_id, chat))
+        if chat.asks or self.gate is None or is_private or msg.is_bot or msg.is_me:
+            return
+        state = self.store.chat_state(msg.chat_id)
+        if state.talk_level <= 0 or blocked(self.settings, state, msg.chat_id, is_private, self._now()):
+            return
+        # While I only consider joining in, anyone's line restarts the wait.
+        if chat.urge is None:
+            chat.urge_since = clock
+        chat.urge, chat.last_activity = msg, clock
+        self._wake(msg.chat_id, chat)
 
-    async def _run(self, chat_id: int, chat: _Chat) -> None:
-        me = asyncio.current_task()
-        loop = asyncio.get_running_loop()
+    def _queue(self, chat_id: int, chat: _Chat, ask: Ask) -> None:
+        chat.asks.append(ask)
+        chat.last_activity = ask.arrived
+        chat.urge = None  # being called comes first
+        self._wake(chat_id, chat)
+
+    def _wake(self, chat_id: int, chat: _Chat) -> None:
+        if chat.task is None:
+            chat.task = asyncio.get_running_loop().create_task(self._work(chat_id, chat))
+
+    async def _work(self, chat_id: int, chat: _Chat) -> None:
+        """The chat's one worker: answer what waits, a turn at a time, then maybe join in.
+
+        A turn under way is never cancelled; whatever arrives meanwhile waits for the next.
+        """
         try:
-            started = loop.time()
             while True:
-                clock = loop.time()
-                wait = min(
-                    self.settings.quiet_window_s - (clock - chat.last_activity),
-                    self.settings.max_wait_s - (clock - started),
-                )
-                if wait <= 0:
-                    break
-                await asyncio.sleep(wait)
-            if chat.reason == URGE and not self._urge(chat_id):
+                if chat.asks:
+                    await self._quiet(chat, chat.asks[0].arrived)
+                    await self._turn(chat_id, chat, self._take(chat))
+                elif chat.urge is not None and not self._closing:
+                    await self._quiet(chat, chat.urge_since)
+                    if chat.asks or chat.urge is None:
+                        continue
+                    chat.urge = None
+                    if self._urge(chat_id):
+                        await self._turn(chat_id, chat, [])
+                else:
+                    return
+        finally:
+            chat.task = None
+
+    async def _quiet(self, chat: _Chat, since: float) -> None:
+        """Wait until the people I am waiting for stop typing, but no longer than max_wait."""
+        loop = asyncio.get_running_loop()
+        while True:
+            clock = loop.time()
+            wait = min(
+                self.settings.quiet_window_s - (clock - chat.last_activity),
+                self.settings.max_wait_s - (clock - since),
+            )
+            if wait <= 0:
                 return
-            chat.generating = True
-            await self._respond(chat_id, chat)
-        except asyncio.CancelledError:
-            raise
+            await asyncio.sleep(wait)
+
+    def _take(self, chat: _Chat) -> list[Ask]:
+        """This turn's questions: oldest first, a few per person; the rest wait."""
+        batch: list[Ask] = []
+        per_asker: Counter[int | None] = Counter()
+        for ask in chat.asks:
+            if len(batch) == BATCH:
+                break
+            if per_asker[ask.msg.user_id] < PER_ASKER:
+                per_asker[ask.msg.user_id] += 1
+                ask.taken = True
+                batch.append(ask)
+        return batch
+
+    async def _turn(self, chat_id: int, chat: _Chat, batch: list[Ask]) -> None:
+        """One model call for `batch`. Whatever happens, those questions are done after it."""
+        try:
+            await self._respond(chat_id, chat, batch)
         except Exception as exc:  # noqa: BLE001 - never let one chat kill the loop
             # The message may quote chat text, so only the type is logged.
             log.error("respond failed chat=%s error=%s", chat_id, type(exc).__name__)
+            for ask in batch:
+                log.warning("ask dropped chat=%s id=%s why=failed", chat_id, ask.msg.message_id)
         finally:
-            if chat.task is me:
-                chat.generating = False
-                chat.committed = False
-                chat.task = None
-                if chat.dirty:
-                    chat.dirty = False
-                    chat.restarts = 1
-                    chat.last_activity = loop.time()
-                    chat.task = loop.create_task(self._run(chat_id, chat))
+            chat.asks = [ask for ask in chat.asks if ask not in batch]
 
     async def drain(self, timeout: float = 60.0) -> None:
-        """Let answers already under way finish. Called before the process stops,
-        so a restart never cuts a burst off after its first line."""
-        tasks = [chat.task for chat in self._chats.values() if chat.task is not None and not chat.task.done()]
+        """Answer what is already waiting before the process stops, so a restart neither
+        cuts a burst off after its first line nor leaves a question behind. No new
+        uncalled-for turn starts from here on."""
+        self._closing = True
+        tasks = [chat.task for chat in self._chats.values() if chat.task is not None]
         if tasks:
             await asyncio.wait(tasks, timeout=timeout)
+        left = sum(len(chat.asks) for chat in self._chats.values())
+        if left:
+            log.warning("stopping with asks=%d unanswered", left)
 
     def _urge(self, chat_id: int) -> bool:
         """Nobody called me: is this moment worth asking myself whether to speak?"""
@@ -241,24 +286,29 @@ class Harness:
         title: str | None = None,
         is_private: bool = False,
     ) -> Outcome:
-        """Record a message and answer it right away, without debouncing."""
+        """Record a message and answer it right away, without queueing. `URGE` means nobody called me."""
         self.store.record(msg)
         chat = self._chats.setdefault(msg.chat_id, _Chat())
         chat.title, chat.is_private = title, is_private
-        chat.trigger, chat.reason = msg, reason
-        return await self._respond(msg.chat_id, chat)
+        asks = [] if reason == URGE else [Ask(msg, reason, asyncio.get_running_loop().time())]
+        return await self._respond(msg.chat_id, chat, asks)
 
     # -- decide and act ---------------------------------------------------
 
-    async def _respond(self, chat_id: int, chat: _Chat) -> Outcome:
+    async def _respond(self, chat_id: int, chat: _Chat, asks: Sequence[Ask]) -> Outcome:
+        """Answer `asks` in one go; with none, I am only considering joining in."""
         now = self._now()
         msgs = self.store.recent(
             chat_id, self.settings.context_messages, self.settings.context_max_age_s, now
         )
         if self.fetch is not None and self.check is not None:
             msgs = await look(msgs, self.store, self.look_model, self.fetch, self.check)
-        turns = render_turns(msgs, lookup=lambda message_id: self.store.get(chat_id, message_id))
-        unprompted = chat.reason == URGE
+
+        def lookup(message_id: int) -> Msg | None:
+            return self.store.get(chat_id, message_id)
+
+        turns = render_turns(msgs, lookup=lookup)
+        unprompted = not asks
         header = scene_header(
             chat.title,
             chat.is_private,
@@ -266,13 +316,17 @@ class Harness:
             datetime.fromtimestamp(now, self._tz),
             unprompted=unprompted,
         )
-        around = self._around(chat_id, chat, msgs, now)
+        around = self._around(chat_id, chat, msgs, now, asks)
+        pending = self._pending(msgs, asks, lookup)
+        why = ",".join(dict.fromkeys(ask.reason for ask in asks)) or URGE
 
         recalled: list[int] = []
         memory = ""
-        if self.recall is not None and turns and turns[-1]["role"] == "user":
+        if self.recall is not None and (pending or (turns and turns[-1]["role"] == "user")):
+            # With a list of questions, the questions are what this moment is about.
+            query = tail_text([ask.msg for ask in asks], lines=len(asks)) if pending else tail_text(msgs)
             try:
-                recalled = self.recall.search(tail_text(msgs), chat_id, self.settings.recall_scenes)
+                recalled = self.recall.search(query, chat_id, self.settings.recall_scenes)
                 memory = self.recall.render(recalled)
             except Exception as exc:  # noqa: BLE001 - answering without memories beats not answering
                 log.warning("recall failed chat=%s error=%s", chat_id, type(exc).__name__)
@@ -295,6 +349,7 @@ class Harness:
                 memory=memory,
                 facts=self.persona.facts_text(),
                 around=around,
+                pending=pending,
             )
             if messages is None:
                 return Outcome("nothing")
@@ -333,11 +388,14 @@ class Harness:
         assert reply is not None
         kind = "said" if final else "silent"
         log.info(
-            "%s chat=%s why=%s n=%d lens=%s recalled=%d tries=%d latency=%.1fs prompt_tok=%d "
-            "cached=%d reasoning_tok=%s violations=%s",
+            "%s chat=%s why=%s asks=%d listed=%s left=%d n=%d lens=%s recalled=%d tries=%d "
+            "latency=%.1fs prompt_tok=%d cached=%d reasoning_tok=%s violations=%s",
             kind,
             chat_id,
-            chat.reason,
+            why,
+            len(asks),
+            bool(pending),
+            sum(not ask.taken for ask in chat.asks),
             len(final),
             [len(text) for text in final],
             len(recalled),
@@ -348,7 +406,7 @@ class Harness:
             thought,
             list(violations),
         )
-        self._trace(chat_id, chat, turns, reply, final, violations, attempts)
+        self._trace(chat_id, why, asks, turns, reply, final, violations, attempts)
         outcome = Outcome(kind, final, violations, reply.reasoning, attempts, len(recalled))
         if unprompted and self.gate is not None:
             if final:
@@ -358,8 +416,7 @@ class Harness:
         if not final:
             return outcome
 
-        chat.committed = True
-        reply_to = self._reply_target(chat_id, chat)
+        reply_to = self._reply_target(chat_id, chat, asks)
 
         def on_sent(message_id: int, text: str, target: int | None) -> None:
             self.store.record(
@@ -389,7 +446,9 @@ class Harness:
         )
         return outcome
 
-    def _around(self, chat_id: int, chat: _Chat, msgs: list[Msg], now: float) -> str:
+    def _around(
+        self, chat_id: int, chat: _Chat, msgs: list[Msg], now: float, asks: Sequence[Ask]
+    ) -> str:
         """What I know about this group, the people talking, and the last few days."""
         if chat.is_private:
             return ""
@@ -398,10 +457,10 @@ class Harness:
             if not msg.is_me and msg.user_id is not None:
                 names.setdefault(msg.user_id, clean_name(msg.user_name))
         order = list(names)
-        trigger = chat.trigger
-        if trigger is not None and trigger.user_id in names:
-            order.remove(trigger.user_id)
-            order.insert(0, trigger.user_id)
+        for ask in asks:  # oldest first, so the latest asker ends up in front
+            if ask.msg.user_id in order:
+                order.remove(ask.msg.user_id)
+                order.insert(0, ask.msg.user_id)
         cards = self.persona.people_cards(chat_id, order, self.settings.people_cards)
         today = datetime.fromtimestamp(now, self._tz).strftime("%Y-%m-%d")
         return render_around(
@@ -410,23 +469,43 @@ class Harness:
             self.persona.diary(chat_id, today, self.settings.diary_days),
         )
 
-    def _reply_target(self, chat_id: int, chat: _Chat) -> int | None:
-        """Quote the message I am answering once the chat has moved on past it.
+    def _pending(self, msgs: list[Msg], asks: Sequence[Ask], lookup: Lookup) -> str:
+        """The questions still waiting, numbered, when the chat alone does not make them clear.
+
+        One question followed only by its asker's own lines is clear: the prompt then
+        reads exactly as it always did.
+        """
+        if not asks:
+            return ""
+        ids = [m.message_id for m in msgs]
+        first = asks[0].msg
+        if len(asks) == 1 and first.message_id in ids:
+            after = msgs[ids.index(first.message_id) + 1 :]
+            if all(not m.is_me and m.user_id == first.user_id for m in after):
+                return ""
+        shown = {m.message_id: m for m in msgs}  # these carry what their pictures show
+        lines = []
+        for ask in asks:
+            msg = shown.get(ask.msg.message_id, ask.msg)
+            lines.append((render_lines([msg], lookup) or [render_body(msg)])[0])
+        return render_pending(lines)
+
+    def _reply_target(self, chat_id: int, chat: _Chat, asks: Sequence[Ask]) -> int | None:
+        """Quote the one question I am answering once the chat has moved on past it.
 
         Counted at the moment I send, so lines that arrived while I was thinking
         count too: a late answer with no quote leaves people guessing who it is for.
         """
-        trigger = chat.trigger
-        if chat.is_private or trigger is None:
+        if chat.is_private or len(asks) != 1:
             return None
-        if self.store.newer(chat_id, trigger.message_id) > QUOTE_AFTER:
-            return trigger.message_id
-        return None
+        message_id = asks[0].msg.message_id
+        return message_id if self.store.newer(chat_id, message_id) > QUOTE_AFTER else None
 
     def _trace(
         self,
         chat_id: int,
-        chat: _Chat,
+        why: str,
+        asks: Sequence[Ask],
         turns: list[dict[str, str]],
         reply: ModelReply,
         final: tuple[str, ...],
@@ -440,8 +519,8 @@ class Harness:
         record = {
             "time": now.isoformat(timespec="seconds"),
             "chat_id": chat_id,
-            "why": chat.reason,
-            "trigger": chat.trigger.message_id if chat.trigger else None,
+            "why": why,
+            "asks": [ask.msg.message_id for ask in asks],
             "turns": turns,
             "reasoning": reply.reasoning,
             "said": list(final),

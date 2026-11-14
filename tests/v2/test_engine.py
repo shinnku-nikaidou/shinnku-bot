@@ -173,6 +173,76 @@ class AnswerTests(HarnessCase):
         self.assertEqual(record["why"], "mention")
 
 
+class QueueTests(HarnessCase):
+    """Several people calling me at once: every question is answered or knowingly passed."""
+
+    async def test_a_question_asked_while_i_answer_is_not_lost(self) -> None:
+        harness = self.build(FakeModel(say("嗯"), delay=0.1))
+        harness.handle(msg(1, "真红 今晚开黑吗"), "name", title="测试群")
+        await asyncio.sleep(0.06)  # past the quiet window: I am thinking
+        harness.handle(msg(2, "真红 几点", user_id=8, name="阿树"), "name", title="测试群")
+        await asyncio.sleep(0.06)
+        harness.handle(msg(3, "真红 带我一个", user_id=9, name="阿秋"), "name", title="测试群")
+        await self.settle(harness)
+
+        self.assertIn("阿秋: 真红 带我一个", self.model.calls[-1][-1]["content"])
+        self.assertEqual(len(self.outbox.sent), 2)
+        self.assertEqual(self.model.finished, len(self.model.calls), "no call is abandoned")
+
+    async def test_questions_do_not_multiply_calls(self) -> None:
+        harness = self.build(FakeModel(say("嗯"), delay=0.1))
+        harness.handle(msg(1, "真红 在吗"), "name", title="测试群")
+        await asyncio.sleep(0.06)
+        for i in range(2, 12):  # ten people call me while I am thinking
+            harness.handle(msg(i, f"真红 问题{i}", user_id=100 + i, name=f"路人{i}"), "name", title="测试群")
+        await self.settle(harness)
+
+        listed = [sum(line.startswith("[") for line in call[-1]["content"].splitlines()) for call in self.model.calls]
+        self.assertEqual(listed, [0, 6, 4])
+
+    async def test_a_question_seen_and_passed_is_done(self) -> None:
+        harness = self.build(FakeModel(say("嗯"), silent(), delay=0.1))
+        harness.handle(msg(1, "真红 在吗"), "name", title="测试群")
+        await asyncio.sleep(0.06)
+        harness.handle(msg(2, "真红 一", user_id=8, name="阿树"), "name", title="测试群")
+        harness.handle(msg(3, "真红 二", user_id=9, name="阿秋"), "name", title="测试群")
+        await self.settle(harness)
+        self.assertEqual(len(self.model.calls), 2)
+        self.assertEqual(self.outbox.texts, ["嗯"])
+
+    async def test_more_from_the_asker_while_i_answer_waits_for_the_next_turn(self) -> None:
+        harness = self.build(FakeModel(say("好"), silent(), delay=0.15))
+        harness.handle(msg(1, "真红 出来"), "name")
+        await asyncio.sleep(0.08)  # past the quiet window, model call in flight
+        for i in range(2, 5):
+            harness.handle(msg(i, f"补充{i}"), None)
+        await self.settle(harness)
+
+        self.assertEqual((len(self.model.calls), self.model.finished), (2, 2), "nothing is cancelled")
+        self.assertEqual(self.outbox.texts, ["好"])
+        pending = self.model.calls[1][-1]["content"]
+        self.assertIn("[1] 小林: 补充4", pending)
+        self.assertNotIn("[2]", pending, "one follow-up each, the latest")
+
+    async def test_the_quote_stays_on_the_question_answered(self) -> None:
+        harness = self.build(FakeModel(say("来"), silent(), delay=0.15))
+        harness.handle(msg(1, "真红 打游戏吗"), "name")
+        await asyncio.sleep(0.08)  # past the quiet window: I am thinking now
+        for i in range(2, 7):
+            harness.handle(msg(i, "刷屏", user_id=8, name="阿树"), None)
+        harness.handle(msg(7, "真红 我也要", user_id=9, name="阿秋"), "name")
+        await self.settle(harness)
+        self.assertEqual(self.outbox.sent, [(100, "来", 1)])
+
+    async def test_draining_answers_what_is_waiting(self) -> None:
+        harness = self.build(FakeModel(say("嗯"), delay=0.1))
+        harness.handle(msg(1, "真红 在吗"), "name")
+        await asyncio.sleep(0.06)
+        harness.handle(msg(2, "真红 还有我", user_id=8, name="阿树"), "name")
+        await harness.drain()
+        self.assertEqual(len(self.outbox.sent), 2)
+
+
 class DebounceTests(HarnessCase):
     async def test_unaddressed_messages_are_stored_but_do_not_wake_me(self) -> None:
         harness = self.build(FakeModel(say("嗯")))
@@ -206,18 +276,6 @@ class DebounceTests(HarnessCase):
         await self.settle(harness)
         self.assertLess(asyncio.get_running_loop().time() - started, 0.6)
         self.assertGreaterEqual(len(self.model.calls), 1)
-
-    async def test_new_line_while_thinking_restarts_once(self) -> None:
-        harness = self.build(FakeModel(say("好"), delay=0.15))
-        harness.handle(msg(1, "真红 出来"), "name")
-        await asyncio.sleep(0.08)  # past the quiet window, model call in flight
-        harness.handle(msg(2, "算了不用了"), None)
-        await self.settle(harness)
-
-        self.assertEqual(len(self.model.calls), 2, "the first call is abandoned")
-        self.assertEqual(self.model.finished, 1)
-        self.assertEqual(self.outbox.texts, ["好"])
-        self.assertIn("算了不用了", self.model.calls[1][-1]["content"])
 
     async def test_someone_else_talking_does_not_restart(self) -> None:
         harness = self.build(FakeModel(say("好"), delay=0.1))

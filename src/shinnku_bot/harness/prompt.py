@@ -13,6 +13,13 @@ PEOPLE_INTRO = "眼前这几个人："
 DIARY_INTRO = "前几天这里的事，我还记得："
 MEMORY_INTRO = "眼下这情形，让我想起以前这几次："
 UNPROMPTED = "没人叫我，我只是在看；有想说的就说，没有就不说"
+PENDING_INTRO = "冲我来的，还没回："
+
+
+def render_pending(lines: Sequence[str]) -> str:
+    """The questions still waiting for me, numbered so an answer can say which one it is for."""
+    body = "\n".join(f"[{number}] {line}" for number, line in enumerate(lines, 1))
+    return f"（{PENDING_INTRO}\n{body}）"
 
 
 def scene_header(
@@ -63,14 +70,16 @@ def build_messages(
     memory: str = "",
     facts: str = "",
     around: str = "",
+    pending: str = "",
 ) -> list[dict[str, str]] | None:
     """Identity, facts and fixed sample; then the chat, opened by this place and recalled moments.
 
     The system message never changes between requests, so it caches. What changes
     goes in the chat: the codex models cache nothing past a system text that
-    changes. Returns None when there is nothing to answer: no turns, or I spoke last.
+    changes. `pending` (the questions still waiting) closes the chat. Returns None
+    when there is nothing to answer: no turns, or I spoke last and nobody is waiting.
     """
-    if not turns or turns[-1]["role"] != "user":
+    if not turns or (turns[-1]["role"] != "user" and not pending):
         return None
     system = self_text.strip()
     if facts.strip():
@@ -90,6 +99,10 @@ def build_messages(
         body[0]["content"] = f"{lead}\n{body[0]['content']}"
     else:
         body.insert(0, {"role": "user", "content": lead})
+    if pending and body[-1]["role"] == "user":
+        body[-1]["content"] += f"\n{pending}"
+    elif pending:
+        body.append({"role": "user", "content": pending})
     messages.extend(body)
     messages.extend({"role": "system", "content": note} for note in notes)
     return messages
