@@ -14,9 +14,15 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from shinnku_bot.config import Settings
-from shinnku_bot.harness.act import TOOLS, Say, parse_action
+from shinnku_bot.harness.act import TOOLS, Line, Say, parse_action
 from shinnku_bot.harness.attention import blocked
-from shinnku_bot.harness.hooks import RETRY_NOTES, StyleLimits, check
+from shinnku_bot.harness.hooks import (
+    RETRY_NOTES,
+    StyleLimits,
+    clean,
+    fit,
+    violations_of,
+)
 from shinnku_bot.harness.look import Check, Fetch, look
 from shinnku_bot.harness.persona import Persona
 from shinnku_bot.harness.prompt import (
@@ -50,6 +56,8 @@ QUOTE_AFTER = 4
 # Questions per turn, and per person per turn. The rest wait for the next turn.
 BATCH = 6
 PER_ASKER = 3
+# Messages in one turn, within Telegram's 20 a minute in a group.
+TURN_MESSAGES = 12
 
 
 @dataclass(frozen=True)
@@ -332,7 +340,7 @@ class Harness:
                 log.warning("recall failed chat=%s error=%s", chat_id, type(exc).__name__)
 
         notes: list[str] = []
-        final: tuple[str, ...] = ()
+        final: tuple[Line, ...] = ()
         violations: tuple[str, ...] = ()
         reply: ModelReply | None = None
         attempts = 0
@@ -374,30 +382,33 @@ class Harness:
             if not isinstance(action, Say):
                 final, violations = (), ()
                 break
-            result = check(action.messages, self.limits)
-            violations = result.violations
+            lines = tuple((to, text) for to, item in action.messages for text in clean([item], self.limits))
+            violations = violations_of([text for _, text in lines], self.limits)
             if not violations:
-                final = result.messages
+                final = lines
                 break
             if attempt == 0:
                 notes = [RETRY_NOTES[name] for name in violations]
                 continue
             # Second draft is still off. Long is tolerable; sounding like a help desk is not.
-            final = () if "ai_tone" in violations else result.messages
+            final = () if "ai_tone" in violations else lines
 
         assert reply is not None
-        kind = "said" if final else "silent"
+        answers = self._route(asks, final)
+        said = tuple(text for _, texts in answers for text in texts)
+        kind = "said" if said else "silent"
         log.info(
-            "%s chat=%s why=%s asks=%d listed=%s left=%d n=%d lens=%s recalled=%d tries=%d "
-            "latency=%.1fs prompt_tok=%d cached=%d reasoning_tok=%s violations=%s",
+            "%s chat=%s why=%s asks=%d listed=%s answered=%d left=%d n=%d lens=%s recalled=%d "
+            "tries=%d latency=%.1fs prompt_tok=%d cached=%d reasoning_tok=%s violations=%s",
             kind,
             chat_id,
             why,
             len(asks),
             bool(pending),
+            sum(ask is not None for ask, _ in answers),
             sum(not ask.taken for ask in chat.asks),
-            len(final),
-            [len(text) for text in final],
+            len(said),
+            [len(text) for text in said],
             len(recalled),
             attempts,
             latency,
@@ -406,17 +417,22 @@ class Harness:
             thought,
             list(violations),
         )
-        self._trace(chat_id, why, asks, turns, reply, final, violations, attempts)
-        outcome = Outcome(kind, final, violations, reply.reasoning, attempts, len(recalled))
+        self._trace(chat_id, why, asks, turns, reply, said, violations, attempts)
+        outcome = Outcome(kind, said, violations, reply.reasoning, attempts, len(recalled))
         if unprompted and self.gate is not None:
-            if final:
+            if said:
                 self.gate.spoke(chat_id, now)
             else:
                 self.gate.stayed_silent(chat_id, now)
-        if not final:
+        if not said:
             return outcome
 
-        reply_to = self._reply_target(chat_id, chat, asks)
+        # Quotes are worked out now, at the moment I send, so the lines that came in
+        # while I was thinking count too.
+        out: list[tuple[str, int | None]] = []
+        for ask, texts in answers:
+            quote = self._quote(chat_id, chat, asks, ask)
+            out.extend((text, quote if index == 0 else None) for index, text in enumerate(texts))
 
         def on_sent(message_id: int, text: str, target: int | None) -> None:
             self.store.record(
@@ -437,8 +453,7 @@ class Harness:
         await send_burst(
             self.outbox,
             chat_id,
-            final,
-            reply_to,
+            out,
             sleep=self._sleep,
             rng=self._rng,
             on_sent=on_sent,
@@ -490,16 +505,35 @@ class Harness:
             lines.append((render_lines([msg], lookup) or [render_body(msg)])[0])
         return render_pending(lines)
 
-    def _reply_target(self, chat_id: int, chat: _Chat, asks: Sequence[Ask]) -> int | None:
-        """Quote the one question I am answering once the chat has moved on past it.
+    def _route(self, asks: Sequence[Ask], lines: Sequence[Line]) -> list[tuple[Ask | None, tuple[str, ...]]]:
+        """Group the lines by the question they answer, in the order the groups first appear.
 
-        Counted at the moment I send, so lines that arrived while I was thinking
-        count too: a late answer with no quote leaves people guessing who it is for.
+        With one question every line answers it. A number not on the list counts as
+        none. Each group is capped so that a turn stays within TURN_MESSAGES.
         """
-        if chat.is_private or len(asks) != 1:
+        groups: dict[int | None, list[str]] = {}
+        for to, text in lines:
+            if len(asks) == 1:
+                key: int | None = 0
+            else:
+                key = to - 1 if to is not None and 1 <= to <= len(asks) else None
+            groups.setdefault(key, []).append(text)
+        cap = max(1, min(self.limits.max_burst, TURN_MESSAGES // max(len(groups), 1)))
+        return [(None if key is None else asks[key], fit(texts, cap)) for key, texts in groups.items()]
+
+    def _quote(self, chat_id: int, chat: _Chat, asks: Sequence[Ask], ask: Ask | None) -> int | None:
+        """What the first line of an answer to `ask` quotes.
+
+        Answering several people, each answer quotes its question. Answering one, only
+        once the chat has moved on past it: a late answer with no quote leaves people
+        guessing who it is for.
+        """
+        if chat.is_private or ask is None:
             return None
-        message_id = asks[0].msg.message_id
-        return message_id if self.store.newer(chat_id, message_id) > QUOTE_AFTER else None
+        message_id = ask.msg.message_id
+        if len(asks) > 1 or self.store.newer(chat_id, message_id) > QUOTE_AFTER:
+            return message_id
+        return None
 
     def _trace(
         self,

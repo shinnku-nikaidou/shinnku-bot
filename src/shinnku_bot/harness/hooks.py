@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
@@ -12,14 +12,9 @@ class StyleLimits:
     """Placeholder limits until the style fingerprint supplies measured ones."""
 
     max_len: int = 80
+    # Messages in one answer to one question.
     max_burst: int = 4
     strip_period: bool = True
-
-
-@dataclass(frozen=True)
-class HookResult:
-    messages: tuple[str, ...]
-    violations: tuple[str, ...] = field(default=())
 
 
 # What I tell myself when a draft is off, appended before the second try.
@@ -77,12 +72,19 @@ def clean(messages: Sequence[str], limits: StyleLimits = StyleLimits()) -> tuple
     return tuple(out)
 
 
-def check(messages: Sequence[str], limits: StyleLimits = StyleLimits()) -> HookResult:
-    cleaned = clean(messages, limits)
-    violations: list[str] = []
-    joined = "\n".join(cleaned)
+def violations_of(lines: Sequence[str], limits: StyleLimits = StyleLimits()) -> tuple[str, ...]:
+    """What is off about these cleaned lines."""
+    found: list[str] = []
+    joined = "\n".join(lines)
     if any(pattern.search(joined) for pattern in _AI_TONE):
-        violations.append("ai_tone")
-    if any(len(message) > limits.max_len for message in cleaned):
-        violations.append("too_long")
-    return HookResult(cleaned[: limits.max_burst], tuple(violations))
+        found.append("ai_tone")
+    if any(len(line) > limits.max_len for line in lines):
+        found.append("too_long")
+    return tuple(found)
+
+
+def fit(lines: Sequence[str], cap: int) -> tuple[str, ...]:
+    """At most `cap` messages. The overflow joins the last one, a line each: nothing is dropped."""
+    if len(lines) <= cap:
+        return tuple(lines)
+    return (*lines[: cap - 1], "\n".join(lines[cap - 1 :]))

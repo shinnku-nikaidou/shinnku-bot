@@ -12,7 +12,7 @@ from types import SimpleNamespace
 from shinnku_bot.config import load_settings
 from shinnku_bot.harness.act import Say, Silent, parse_action
 from shinnku_bot.harness.attention import addressed, blocked, mentions_bot
-from shinnku_bot.harness.hooks import StyleLimits, check, clean
+from shinnku_bot.harness.hooks import StyleLimits, clean, fit, violations_of
 from shinnku_bot.harness.prompt import build_messages, scene_header
 from shinnku_bot.harness.send import typing_delay
 from shinnku_bot.harness.transcript import clean_name, render_turns
@@ -229,11 +229,16 @@ class PromptTests(unittest.TestCase):
 class ActTests(unittest.TestCase):
     def test_say(self) -> None:
         reply = ModelReply(tool_calls=(ToolCall("say", {"messages": ["打", " ", "十点"]}),))
-        self.assertEqual(parse_action(reply), Say(("打", "十点")))
+        self.assertEqual(parse_action(reply), Say(((None, "打"), (None, "十点"))))
+
+    def test_say_names_the_question_it_answers(self) -> None:
+        items = [{"text": "八点", "to": 2}, {"text": "都来"}, {"text": "行", "to": "1"}, {"text": "嗯", "to": True}]
+        reply = ModelReply(tool_calls=(ToolCall("say", {"messages": items}),))
+        self.assertEqual(parse_action(reply), Say(((2, "八点"), (None, "都来"), (None, "行"), (None, "嗯"))))
 
     def test_say_accepts_a_bare_string(self) -> None:
         reply = ModelReply(tool_calls=(ToolCall("say", {"messages": "打"}),))
-        self.assertEqual(parse_action(reply), Say(("打",)))
+        self.assertEqual(parse_action(reply), Say(((None, "打"),)))
 
     def test_silent(self) -> None:
         self.assertEqual(parse_action(ModelReply(tool_calls=(ToolCall("stay_silent", {}),))), Silent())
@@ -242,14 +247,15 @@ class ActTests(unittest.TestCase):
         reply = ModelReply(
             tool_calls=(ToolCall("stay_silent", {}), ToolCall("say", {"messages": ["嗯"]}))
         )
-        self.assertEqual(parse_action(reply), Say(("嗯",)))
+        self.assertEqual(parse_action(reply), Say(((None, "嗯"),)))
 
     def test_malformed_say_is_not_speech(self) -> None:
         self.assertIsNone(parse_action(ModelReply(tool_calls=(ToolCall("say", {}),))))
         self.assertIsNone(parse_action(ModelReply(tool_calls=(ToolCall("say", {"messages": [1]}),))))
+        self.assertIsNone(parse_action(ModelReply(tool_calls=(ToolCall("say", {"messages": [{"to": 1}]}),))))
 
     def test_plain_content_fallback(self) -> None:
-        self.assertEqual(parse_action(ModelReply(content="打\n十点")), Say(("打", "十点")))
+        self.assertEqual(parse_action(ModelReply(content="打\n十点")), Say(((None, "打"), (None, "十点"))))
         self.assertIsNone(parse_action(ModelReply()))
 
 
@@ -268,9 +274,7 @@ class HookTests(unittest.TestCase):
         self.assertEqual(clean(["行。"], StyleLimits(strip_period=False)), ("行。",))
 
     def test_ok(self) -> None:
-        result = check(["打", "十点"])
-        self.assertEqual(result.messages, ("打", "十点"))
-        self.assertEqual(result.violations, ())
+        self.assertEqual(violations_of(clean(["打", "十点"])), ())
 
     def test_ai_tone(self) -> None:
         for text in (
@@ -282,17 +286,19 @@ class HookTests(unittest.TestCase):
             "以下是几点建议",
         ):
             with self.subTest(text=text):
-                self.assertIn("ai_tone", check([text]).violations)
+                self.assertIn("ai_tone", violations_of([text]))
 
     def test_ordinary_chat_is_not_ai_tone(self) -> None:
         for text in ("你才是bot", "不知道 懒得查", "我不能喝酒", "帮我带一份", "首先我没钱"):
             with self.subTest(text=text):
-                self.assertEqual(check([text]).violations, ())
+                self.assertEqual(violations_of([text]), ())
 
-    def test_too_long_and_burst_cap(self) -> None:
-        result = check(["啊" * 81, "a", "b", "c", "d"], StyleLimits(max_len=80, max_burst=4))
-        self.assertEqual(result.violations, ("too_long",))
-        self.assertEqual(len(result.messages), 4)
+    def test_too_long(self) -> None:
+        self.assertEqual(violations_of(["啊" * 81, "a"], StyleLimits(max_len=80)), ("too_long",))
+
+    def test_fit_merges_the_overflow_instead_of_dropping_it(self) -> None:
+        self.assertEqual(fit(["a", "b"], 3), ("a", "b"))
+        self.assertEqual(fit(["a", "b", "c", "d", "e"], 3), ("a", "b", "c\nd\ne"))
 
 
 class AttentionTests(unittest.TestCase):

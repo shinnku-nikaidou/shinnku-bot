@@ -28,6 +28,7 @@ from tests.v2.fakes import (
     msg,
     no_sleep,
     say,
+    say_to,
     silent,
     tg_message,
     tg_user,
@@ -233,6 +234,25 @@ class QueueTests(HarnessCase):
         harness.handle(msg(7, "真红 我也要", user_id=9, name="阿秋"), "name")
         await self.settle(harness)
         self.assertEqual(self.outbox.sent, [(100, "来", 1)])
+
+    async def test_each_answer_quotes_its_question(self) -> None:
+        harness = self.build(FakeModel(say("嗯"), say_to((2, "带"), (None, "都来"), (1, "八点"), (1, "别迟到")), delay=0.1))
+        harness.handle(msg(1, "真红 在吗"), "name", title="测试群")
+        await asyncio.sleep(0.06)
+        harness.handle(msg(2, "真红 几点", user_id=8, name="阿树"), "name", title="测试群")
+        harness.handle(msg(3, "真红 带我一个", user_id=9, name="阿秋"), "name", title="测试群")
+        await self.settle(harness)
+
+        self.assertIn("[1] 阿树: 真红 几点\n[2] 阿秋: 真红 带我一个", self.model.calls[1][-1]["content"])
+        self.assertEqual(
+            self.outbox.sent,
+            [(100, "嗯", None), (100, "带", 3), (100, "都来", None), (100, "八点", 2), (100, "别迟到", None)],
+        )
+
+    async def test_a_long_answer_is_merged_not_cut(self) -> None:
+        harness = self.build(FakeModel(say("一", "二", "三", "四", "五", "六")))  # max_burst is 4 here
+        outcome = await harness.answer(msg(1, "真红 数数"), "name")
+        self.assertEqual(outcome.messages, ("一", "二", "三", "四\n五\n六"))
 
     async def test_draining_answers_what_is_waiting(self) -> None:
         harness = self.build(FakeModel(say("嗯"), delay=0.1))

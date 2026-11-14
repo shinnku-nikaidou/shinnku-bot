@@ -39,6 +39,12 @@ def say(*messages: str, reasoning: str = "") -> ModelReply:
     )
 
 
+def say_to(*messages: tuple[int | None, str]) -> ModelReply:
+    """A say call whose messages name the waiting question they answer."""
+    items = [{"text": text} if to is None else {"text": text, "to": to} for to, text in messages]
+    return ModelReply(tool_calls=(ToolCall("say", {"messages": items}),))
+
+
 def silent() -> ModelReply:
     return ModelReply(tool_calls=(ToolCall("stay_silent", {}),))
 

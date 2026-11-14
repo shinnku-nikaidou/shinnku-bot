@@ -33,18 +33,16 @@ def typing_delay(text: str, jitter: float, pace: Pace = Pace()) -> float:
 async def send_burst(
     outbox: Outbox,
     chat_id: int,
-    messages: Sequence[str],
-    reply_to: int | None,
+    messages: Sequence[tuple[str, int | None]],
     *,
     sleep: Callable[[float], Awaitable[None]],
     rng: Callable[[], float],
     on_sent: Callable[[int, str, int | None], None],
     pace: Pace = Pace(),
 ) -> None:
-    """Send each message after a typing pause. Only the first one quotes `reply_to`."""
-    for index, text in enumerate(messages):
+    """Send each (text, message it quotes or None) after a typing pause."""
+    for text, reply_to in messages:
         await outbox.typing(chat_id)
         await sleep(typing_delay(text, rng(), pace))
-        target = reply_to if index == 0 else None
-        message_id = await outbox.send(chat_id, text, target)
-        on_sent(message_id, text, target)
+        message_id = await outbox.send(chat_id, text, reply_to)
+        on_sent(message_id, text, reply_to)
