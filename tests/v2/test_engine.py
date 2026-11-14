@@ -9,12 +9,13 @@ import unittest
 from pathlib import Path
 
 import httpx
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, RateLimitError
 
 from shinnku_bot.harness.engine import Harness
+from shinnku_bot.harness.factory import live_model
 from shinnku_bot.harness.hooks import RETRY_NOTES
 from shinnku_bot.harness.persona import Persona
-from shinnku_bot.llm import GatewayModel, ModelReply
+from shinnku_bot.llm import FALLBACK_S, FallbackModel, GatewayModel, ModelReply
 from shinnku_bot.store import Store
 
 from tests.v2.fakes import BOT_ID, FakeModel, FakeOutbox, make_settings, msg, no_sleep, say, silent
@@ -346,6 +347,47 @@ class GatewayModelTests(unittest.IsolatedAsyncioTestCase):
         first, second = (json.loads(request.content) for request in self.requests)
         self.assertEqual(first["thinking"], {"type": "disabled"})
         self.assertIn("reasoning_effort", second)
+
+
+class FallbackModelTests(unittest.IsolatedAsyncioTestCase):
+    QUOTA = RateLimitError(
+        "quota gone",
+        response=httpx.Response(429, request=httpx.Request("POST", "http://gateway.test/v1/chat/completions")),
+        body=None,
+    )
+
+    async def test_quota_error_hands_over_to_the_backup_for_a_while(self) -> None:
+        now = [0.0]
+        main, backup = FakeModel(self.QUOTA, say("主")), FakeModel(say("备"))
+        model = FallbackModel(main, backup, clock=lambda: now[0])
+
+        with self.assertLogs("shinnku_bot.llm", "WARNING") as logs:
+            reply = await model.complete([], [], thinking=False)
+        self.assertEqual(reply, say("备"))
+        self.assertEqual(backup.options, [{"thinking": False}])
+        self.assertNotIn("quota gone", logs.output[0], "error text is not logged")
+
+        now[0] = FALLBACK_S - 1
+        self.assertEqual(await model.complete([], []), say("备"))
+        self.assertEqual(len(main.calls), 1, "the main model rests meanwhile")
+
+        now[0] = FALLBACK_S + 1
+        self.assertEqual(await model.complete([], []), say("主"))
+        self.assertEqual(len(backup.calls), 2)
+
+    async def test_timeout_stays_with_the_caller(self) -> None:
+        backup = FakeModel(say("备"))
+        model = FallbackModel(FakeModel(TimeoutError()), backup)
+        with self.assertRaises(TimeoutError):
+            await model.complete([], [])
+        self.assertEqual(backup.calls, [])
+
+    def test_backup_only_when_set(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertIsInstance(live_model(make_settings(Path(tmp))), GatewayModel)
+            model = live_model(make_settings(Path(tmp), llm_model_fallback="codex/x"))
+        self.assertIsInstance(model, FallbackModel)
+        self.assertEqual((model.main.model, model.backup.model), ("test-model", "codex/x"))
 
 
 if __name__ == "__main__":

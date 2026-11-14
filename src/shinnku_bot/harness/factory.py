@@ -11,18 +11,25 @@ from shinnku_bot.harness.persona import Persona
 from shinnku_bot.harness.recall import load_recall
 from shinnku_bot.harness.send import Outbox
 from shinnku_bot.harness.urge import Gate, load_urge
-from shinnku_bot.llm import ChatModel, GatewayModel
+from shinnku_bot.llm import ChatModel, FallbackModel, GatewayModel
 from shinnku_bot.store import Store
 
 
-def gateway_model(settings: Settings) -> GatewayModel:
+def gateway_model(settings: Settings, model: str = "") -> GatewayModel:
     return GatewayModel(
         settings.llm_base_url,
         settings.llm_api_key,
-        settings.llm_model,
+        model or settings.llm_model,
         thinking=settings.llm_thinking,
         timeout_s=settings.llm_timeout_s,
     )
+
+
+def live_model(settings: Settings) -> ChatModel:
+    """The chat model, and the backup behind it when one is set. Evaluations keep to the chat model."""
+    if not settings.llm_model_fallback:
+        return gateway_model(settings)
+    return FallbackModel(gateway_model(settings), gateway_model(settings, settings.llm_model_fallback))
 
 
 def build_harness(
@@ -47,7 +54,7 @@ def build_harness(
     return Harness(
         settings,
         store,
-        model or gateway_model(settings),
+        model or live_model(settings),
         outbox,
         Persona(settings.persona_dir),
         bot_id=bot_id,

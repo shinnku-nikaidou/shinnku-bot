@@ -3,11 +3,18 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from openai import APITimeoutError, AsyncOpenAI
+from openai import APIError, APITimeoutError, AsyncOpenAI
+
+log = logging.getLogger(__name__)
+
+# How long the backup answers alone after the main model fails.
+FALLBACK_S = 30 * 60
 
 
 @dataclass(frozen=True)
@@ -124,3 +131,36 @@ class GatewayModel:
             ),
             latency_s=latency,
         )
+
+
+class FallbackModel:
+    """The main model, with a backup that takes over for FALLBACK_S once the main one fails.
+
+    Any gateway error counts: quota gone, key refused, gateway down. A timeout does
+    not; the caller already retries those without thinking.
+    """
+
+    def __init__(
+        self, main: ChatModel, backup: ChatModel, clock: Callable[[], float] = time.monotonic
+    ) -> None:
+        self.main = main
+        self.backup = backup
+        self._clock = clock
+        self._main_from = 0.0
+
+    async def complete(
+        self, messages: list[dict[str, Any]], tools: list[dict[str, Any]], *, thinking: bool | None = None
+    ) -> ModelReply:
+        if self._clock() >= self._main_from:
+            try:
+                return await self.main.complete(messages, tools, thinking=thinking)
+            except APIError as exc:
+                # Not the message: it may quote the prompt.
+                log.warning(
+                    "main model failed (%s %s); backup for %d min",
+                    type(exc).__name__,
+                    getattr(exc, "status_code", ""),
+                    FALLBACK_S // 60,
+                )
+                self._main_from = self._clock() + FALLBACK_S
+        return await self.backup.complete(messages, tools, thinking=thinking)
