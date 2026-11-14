@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sqlite3
+import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -88,6 +90,29 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(self.store.count(100), 1)
         self.assertEqual(self.store.get(100, 1).text, "edited")
 
+    def test_quote_is_kept(self) -> None:
+        self.store.record(msg(2, "去啊", reply_to=1, quote="爬山"))
+        self.assertEqual(self.store.get(100, 2).quote, "爬山")
+
+    def test_store_made_before_quotes_gains_the_column(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "old.sqlite3"
+            old = sqlite3.connect(path)
+            old.execute(
+                "CREATE TABLE messages (chat_id INTEGER NOT NULL, message_id INTEGER NOT NULL,"
+                " ts INTEGER NOT NULL, user_id INTEGER, user_name TEXT NOT NULL, is_me INTEGER NOT NULL,"
+                " is_bot INTEGER NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL, reply_to INTEGER,"
+                " PRIMARY KEY (chat_id, message_id))"
+            )
+            old.execute("INSERT INTO messages VALUES (100, 1, 1, 7, '小林', 0, 0, 'text', '在吗', NULL)")
+            old.commit()
+            old.close()
+            store = Store(path)
+            self.addCleanup(store.close)
+            self.assertEqual(store.get(100, 1).quote, "")
+            store.record(msg(2, "去啊", reply_to=1, quote="在吗"))
+            self.assertEqual(store.get(100, 2).quote, "在吗")
+
     def test_chat_state(self) -> None:
         self.assertEqual(self.store.chat_state(100), ChatState(0, 0))
         self.store.set_quiet_until(100, 123)
@@ -124,13 +149,26 @@ class TranscriptTests(unittest.TestCase):
         )
         self.assertEqual(
             turns[-1]["content"],
-            "阿树: 去哪\n小林（回复我）: 为啥\n小林（回复 阿树）: 爬山\n小林: 嗯",
+            "阿树: 去哪\n小林（回复我「不去」）: 为啥\n小林（回复 阿树「去哪」）: 爬山\n小林: 嗯",
         )
 
     def test_reply_target_outside_window_uses_lookup(self) -> None:
         old = msg(1, "x", user_id=BOT_ID, is_me=True)
         turns = render_turns([msg(9, "还在吗", reply_to=1)], lookup=lambda mid: old if mid == 1 else None)
-        self.assertEqual(turns[0]["content"], "小林（回复我）: 还在吗")
+        self.assertEqual(turns[0]["content"], "小林（回复我「x」）: 还在吗")
+
+    def test_quote_shows_what_is_answered(self) -> None:
+        shu = msg(1, "周六去不去爬山 还是在家打游戏", user_id=8, name="阿树")
+        cases = [
+            # Telegram's copy wins over the stored message: it can be the part the sender picked.
+            (msg(2, "去啊", reply_to=1, quote="爬山"), "小林（回复 阿树「爬山」）: 去啊"),
+            (msg(2, "去啊", reply_to=99, quote="周六去不去爬山"), "小林（回复「周六去不去爬山」）: 去啊"),
+            (msg(2, "笑死", reply_to=99, quote="啊" * 41), f"小林（回复「{'啊' * 40}…」）: 笑死"),
+            (msg(2, "可爱", reply_to=99, quote="[贴纸 😂]"), "小林（回复「[贴纸 😂]」）: 可爱"),
+        ]
+        for line, expected in cases:
+            with self.subTest(expected=expected):
+                self.assertEqual(render_turns([shu, line])[-1]["content"].split("\n")[-1], expected)
 
     def test_media_placeholders(self) -> None:
         turns = render_turns(
@@ -380,6 +418,25 @@ class ConvertTests(unittest.TestCase):
             with self.subTest(kind=kind):
                 converted = to_msg(tg_message(text=None, **extra), BOT_ID)
                 self.assertEqual((converted.kind, converted.text), (kind, text))
+
+    def test_reply_keeps_what_it_quotes(self) -> None:
+        shu = tg_user(8, full_name="阿树")
+        said = tg_message(message_id=3, text="周六去不去爬山", user=shu)
+        cases = [
+            (dict(reply_to=said), (3, "周六去不去爬山")),
+            (dict(reply_to=said, quote=SimpleNamespace(text="爬山")), (3, "爬山")),
+            (dict(reply_to=tg_message(message_id=3, text=None, sticker=SimpleNamespace(emoji="😂"))), (3, "[贴纸 😂]")),
+            (dict(reply_to=tg_message(message_id=3, text=None, photo=[object()], caption="看")), (3, "[图片] 看")),
+            # A reply to a message in another chat comes with the quoted part only.
+            (dict(external_reply=SimpleNamespace(), quote=SimpleNamespace(text="别处的话")), (None, "别处的话")),
+            # Every message in a forum topic "replies" to the topic's opening service message.
+            (dict(reply_to=tg_message(message_id=3, text=None, forum_topic_created=object())), (3, "")),
+            ({}, (None, "")),
+        ]
+        for extra, expected in cases:
+            with self.subTest(expected=expected):
+                converted = to_msg(tg_message(message_id=4, text="去啊", **extra), BOT_ID)
+                self.assertEqual((converted.reply_to, converted.quote), expected)
 
 
 class SmallThingsTests(unittest.TestCase):
