@@ -15,13 +15,13 @@ MAX_BODY = 500
 MAX_NAME = 16
 ME = "我"
 
-_PLACEHOLDER = {
-    "photo": "[图片]",
-    "voice": "[语音]",
-    "video": "[视频]",
-    "animation": "[动图]",
-    "document": "[文件]",
-    "other": "[消息]",
+_LABEL = {
+    "photo": "图片",
+    "sticker": "贴纸",
+    "voice": "语音",
+    "video": "视频",
+    "animation": "动图",
+    "document": "文件",
 }
 
 Lookup = Callable[[int], Msg | None]
@@ -39,10 +39,12 @@ def render_body(msg: Msg) -> str:
         text = text[:MAX_BODY] + "…"
     if msg.kind == "text":
         return text
-    if msg.kind == "sticker":
-        return f"[贴纸 {text}]" if text else "[贴纸]"
-    label = _PLACEHOLDER.get(msg.kind, "[消息]")
-    return f"{label} {text}" if text else label
+    label = _LABEL.get(msg.kind, "消息")
+    if msg.kind == "sticker" and text:
+        # A sticker's text is its emoji, which belongs inside the brackets.
+        label, text = f"{label} {text}", ""
+    tag = f"[{label}：{msg.seen}]" if msg.seen else f"[{label}]"
+    return f"{tag} {text}" if text else tag
 
 
 def _speakers(msgs: Sequence[Msg], lookup: Lookup | None) -> Iterator[tuple[Msg, str, str]]:

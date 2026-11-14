@@ -29,6 +29,17 @@ CREATE TABLE IF NOT EXISTS chats (
     talk_level  INTEGER NOT NULL DEFAULT 0,
     quiet_until INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS pictures (
+    chat_id    INTEGER NOT NULL,
+    message_id INTEGER NOT NULL,
+    file_id    TEXT    NOT NULL,
+    file_uid   TEXT    NOT NULL,
+    PRIMARY KEY (chat_id, message_id)
+);
+CREATE TABLE IF NOT EXISTS seen (
+    file_uid TEXT PRIMARY KEY,
+    text     TEXT NOT NULL
+);
 """
 
 
@@ -47,6 +58,9 @@ class Msg:
     text: str = ""
     is_bot: bool = False
     reply_to: int | None = None
+    # What a photo, sticker or GIF shows, once I have looked at it. Not a column
+    # of messages: the harness fills it in from the pictures I have seen.
+    seen: str = ""
 
 
 @dataclass(frozen=True)
@@ -172,3 +186,26 @@ class Store:
 
     def set_talk_level(self, chat_id: int, level: int) -> None:
         self._set(chat_id, "talk_level", int(level))
+
+    def add_picture(self, chat_id: int, message_id: int, file_id: str, file_uid: str) -> None:
+        self._db.execute(
+            "INSERT OR REPLACE INTO pictures VALUES (?, ?, ?, ?)",
+            (chat_id, message_id, file_id, file_uid),
+        )
+        self._db.commit()
+
+    def picture(self, chat_id: int, message_id: int) -> tuple[str, str, str] | None:
+        """(file_id, file_uid, what it shows) of a message's picture; the last is empty until seen."""
+        row = self._db.execute(
+            """
+            SELECT file_id, file_uid, COALESCE(seen.text, '') FROM pictures
+            LEFT JOIN seen USING (file_uid)
+            WHERE chat_id = ? AND message_id = ?
+            """,
+            (chat_id, message_id),
+        ).fetchone()
+        return tuple(row) if row else None
+
+    def set_seen(self, file_uid: str, text: str) -> None:
+        self._db.execute("INSERT OR REPLACE INTO seen VALUES (?, ?)", (file_uid, text))
+        self._db.commit()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+from functools import partial
 
 from telegram import Bot, ReplyParameters, Update
 from telegram.constants import ChatAction
@@ -15,7 +16,7 @@ from shinnku_bot.harness.engine import Harness
 from shinnku_bot.harness.factory import build_harness
 from shinnku_bot.store import Store
 from shinnku_bot.tg import commands
-from shinnku_bot.tg.convert import to_msg
+from shinnku_bot.tg.convert import picture, to_msg
 
 log = logging.getLogger(__name__)
 
@@ -41,6 +42,11 @@ class TelegramOutbox:
         return sent.message_id
 
 
+async def download(bot: Bot, file_id: str) -> bytes:
+    file = await bot.get_file(file_id)
+    return bytes(await file.download_as_bytearray())
+
+
 async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.message
     if message is None:
@@ -48,6 +54,10 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     me = context.bot_data["me"]
     settings: Settings = context.bot_data["settings"]
     harness: Harness = context.bot_data["harness"]
+    file = picture(message)
+    if file is not None:
+        # Only where to find it; I look at it once it is in front of me when I speak.
+        harness.store.add_picture(message.chat_id, message.message_id, *file)
     if time.time() - message.date.timestamp() > STALE_S:
         harness.store.record(to_msg(message, me.id))
         return
@@ -70,7 +80,12 @@ async def _post_init(application: Application) -> None:
     me = await application.bot.get_me()
     store = Store(settings.db_path)
     harness = build_harness(
-        settings, store, TelegramOutbox(application.bot), bot_id=me.id, bot_username=me.username
+        settings,
+        store,
+        TelegramOutbox(application.bot),
+        bot_id=me.id,
+        bot_username=me.username,
+        fetch=partial(download, application.bot),
     )
     application.bot_data.update(me=me, store=store, harness=harness, started=time.time())
     log.info(
