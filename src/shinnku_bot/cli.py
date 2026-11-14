@@ -686,6 +686,27 @@ def _eval_urge(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+def _eval_exam(settings: Settings, args: argparse.Namespace) -> int:
+    from shinnku_bot.eval.exam_check import check_real, check_set, format_set, load_set
+    from shinnku_bot.harness.factory import gateway_model
+
+    model = gateway_model(settings)
+    if not args.real:
+        print(format_set(asyncio.run(check_set(model, load_set()))))
+        return 0
+    from shinnku_bot.corpus.db import CorpusDB
+
+    db = CorpusDB(settings.corpus_db)
+    try:
+        counts, flagged = asyncio.run(check_real(model, db, settings.name_triggers, args.real))
+    finally:
+        db.close()
+    settings.reports_dir.mkdir(parents=True, exist_ok=True)
+    (settings.reports_dir / "exam-flagged.txt").write_text("\n\n---\n\n".join(flagged), encoding="utf-8")
+    print(f"real: {counts}")
+    return 0
+
+
 def cmd_eval_quiz(args: argparse.Namespace) -> int:
     """Interactive, and meant to show text: this is the owner's own terminal."""
     from shinnku_bot.eval.quiz import run_quiz
@@ -818,6 +839,11 @@ def build_parser() -> argparse.ArgumentParser:
     urge_cmd.add_argument("--seed", type=int, default=0)
     urge_cmd.add_argument("--concurrency", type=int, default=4)
     urge_cmd.set_defaults(func=_corpus(_eval_urge))
+    exam_cmd = eval_sub.add_parser("exam", help="does it tell questions that test the AI from talk")
+    exam_cmd.add_argument(
+        "--real", type=int, default=0, metavar="N", help="instead, N messages people really sent me (counts only)"
+    )
+    exam_cmd.set_defaults(func=_corpus(_eval_exam))
     quiz_cmd = eval_sub.add_parser("quiz", help="take the blind test yourself")
     quiz_cmd.add_argument("--name", default="base")
     quiz_cmd.add_argument("--n", type=int, default=20)
