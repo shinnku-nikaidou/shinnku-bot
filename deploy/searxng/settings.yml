@@ -1,6 +1,10 @@
 # SearXNG for the bot's web lookups. Only reachable from this machine.
 # The secret comes from SEARXNG_SECRET in compose.yml.
-use_default_settings: true
+use_default_settings:
+  engines:
+    # Google only. The plain `google` engine gets "access denied"; this one
+    # goes through Google's custom search page and needs no key.
+    keep_only: [google cse]
 
 general:
   instance_name: shinnku-bot
