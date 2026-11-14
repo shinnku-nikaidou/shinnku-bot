@@ -4,17 +4,13 @@ A Telegram bot that talks like its owner. It reads the owner's exported chat
 history, recalls how they answered in similar moments, and replies in their
 voice. The design and its measured basis are in [plans/v2-plan.md](plans/v2-plan.md).
 
-The new code lives in `src/shinnku_bot/`. The old bot (`src/main.py` and the
-folders next to it) is still what the systemd service runs until the switch.
+The code lives in `src/shinnku_bot/`.
 
 ## Setup
 
 ```bash
-uv sync --inexact
+uv sync
 ```
-
-Use `--inexact` until the old bot is retired: a plain `uv sync` removes the
-packages it still needs.
 
 Copy `.env.example` to `.env` and fill in the Telegram token, your Telegram
 user id and the model gateway.
@@ -25,11 +21,11 @@ Export each chat from Telegram Desktop as JSON without media into
 `~/tg-export/`, then:
 
 ```bash
-uv run --inexact shinnku corpus probe
+uv run shinnku corpus probe
 ```
 
 ```bash
-uv run --inexact shinnku corpus build
+uv run shinnku corpus build
 ```
 
 `probe` prints the structure of the exports. `build` loads them, cuts
@@ -43,11 +39,11 @@ by git.
 ## Distil who I am
 
 ```bash
-uv run --inexact shinnku corpus distill self      # drafts FACTS.md and a quiz about me
-uv run --inexact shinnku corpus distill publish   # after reading and editing the draft
-uv run --inexact shinnku corpus distill people    # a card per person I talk to most, per group
-uv run --inexact shinnku corpus distill groups    # a card per group
-uv run --inexact shinnku corpus moments           # learn when I join in uncalled (no model calls)
+uv run shinnku corpus distill self      # drafts FACTS.md and a quiz about me
+uv run shinnku corpus distill publish   # after reading and editing the draft
+uv run shinnku corpus distill people    # a card per person I talk to most, per group
+uv run shinnku corpus distill groups    # a card per group
+uv run shinnku corpus moments           # learn when I join in uncalled (no model calls)
 ```
 
 Each command prints the size of the job first; `--dry-run` stops there. Results
@@ -61,8 +57,8 @@ facts are distilled.
 ## Evaluate
 
 ```bash
-uv run --inexact shinnku eval run --name base --n 200
-uv run --inexact shinnku eval style --name base
+uv run shinnku eval run --name base --n 200
+uv run shinnku eval style --name base
 ```
 
 `eval run` has the bot answer held-out moments. `eval style` then trains a
@@ -72,23 +68,23 @@ chats, the bare model) say how to read the number. `--no-recall`, `--no-anchor`,
 `--no-thinking`, `--model` and `--draft` give comparison runs.
 
 ```bash
-uv run --inexact shinnku eval facts    # asks the bot the quiz about me
-uv run --inexact shinnku eval urge     # does it speak where I spoke, uncalled
-uv run --inexact shinnku eval quiz --name base   # take the blind test yourself
-uv run --inexact shinnku eval exam     # tells questions that test the AI from talk?
-uv run --inexact shinnku eval exam --real 200    # false alarms on what people really asked me
+uv run shinnku eval facts    # asks the bot the quiz about me
+uv run shinnku eval urge     # does it speak where I spoke, uncalled
+uv run shinnku eval quiz --name base   # take the blind test yourself
+uv run shinnku eval exam     # tells questions that test the AI from talk?
+uv run shinnku eval exam --real 200    # false alarms on what people really asked me
 ```
 
 ## Run
 
 ```bash
-uv run --inexact shinnku chat --show-thinking
+uv run shinnku chat --show-thinking
 ```
 
 talks to the harness in the terminal, without Telegram.
 
 ```bash
-uv run --inexact shinnku bot
+uv run shinnku bot
 ```
 
 runs the Telegram bot. It answers when messaged privately, mentioned, replied
@@ -107,7 +103,7 @@ and the bot brushes them off without thinking. `BRUSH_OFF_EXAMS=off` turns
 this off.
 
 ```bash
-uv run --inexact shinnku memory digest
+uv run shinnku memory digest
 ```
 
 writes yesterday's diary for each group, which the bot reads for the next three

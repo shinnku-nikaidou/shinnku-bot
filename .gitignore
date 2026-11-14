@@ -111,9 +111,5 @@ venv.bak/
 tmp*
 data
 
-sample.log*
-
-anon.session
-
 # Claude Code local settings (machine-specific)
 .claude/settings.local.json
