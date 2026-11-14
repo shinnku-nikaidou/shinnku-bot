@@ -13,7 +13,7 @@ import httpx
 from openai import AsyncOpenAI, RateLimitError
 
 from shinnku_bot.harness.engine import Harness
-from shinnku_bot.harness.factory import live_model
+from shinnku_bot.harness.factory import build_harness, live_model
 from shinnku_bot.harness.hooks import RETRY_NOTES
 from shinnku_bot.harness.persona import Persona
 from shinnku_bot.llm import FALLBACK_S, FallbackModel, GatewayModel, ModelReply
@@ -410,6 +410,17 @@ class FallbackModelTests(unittest.IsolatedAsyncioTestCase):
             model = live_model(make_settings(Path(tmp), llm_model_fallback="codex/x"))
         self.assertIsInstance(model, FallbackModel)
         self.assertEqual((model.main.model, model.backup.model), ("test-model", "codex/x"))
+
+    def test_the_backup_looks_at_pictures(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Store(":memory:")
+            self.addCleanup(store.close)
+            plain = build_harness(make_settings(Path(tmp)), store, FakeOutbox(), bot_id=BOT_ID)
+            backed = build_harness(
+                make_settings(Path(tmp), llm_model_fallback="codex/x"), store, FakeOutbox(), bot_id=BOT_ID
+            )
+        self.assertIs(plain.look_model, plain.model)
+        self.assertEqual(backed.look_model.model, "codex/x")
 
 
 if __name__ == "__main__":

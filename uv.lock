@@ -955,8 +955,11 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastembed" },
+    { name = "huggingface-hub" },
     { name = "numpy" },
+    { name = "onnxruntime" },
     { name = "openai" },
+    { name = "pillow" },
     { name = "python-dotenv" },
     { name = "python-telegram-bot" },
 ]
@@ -964,8 +967,11 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "fastembed", specifier = ">=0.9.1" },
+    { name = "huggingface-hub", specifier = ">=1.33.0" },
     { name = "numpy", specifier = ">=2.5.4" },
+    { name = "onnxruntime", specifier = ">=1.31.1" },
     { name = "openai", specifier = ">=3.49.0" },
+    { name = "pillow", specifier = ">=13.0.0" },
     { name = "python-dotenv", specifier = ">=1.2.4" },
     { name = "python-telegram-bot", specifier = ">=22.8" },
 ]

@@ -51,10 +51,16 @@ def build_harness(
     )
     urge = load_urge(settings.persona_dir / "urge.json")
     gate = Gate(settings, urge) if urge is not None else None
+    if model is None:
+        model = live_model(settings)
+        if settings.llm_model_fallback:
+            # The chat model may not take pictures, and a refused picture would hand
+            # every reply to the backup for a while; the backup looks at them instead.
+            kwargs.setdefault("look_model", gateway_model(settings, settings.llm_model_fallback))
     return Harness(
         settings,
         store,
-        model or live_model(settings),
+        model,
         outbox,
         Persona(settings.persona_dir),
         bot_id=bot_id,

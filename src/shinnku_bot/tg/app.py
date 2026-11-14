@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from functools import partial
@@ -14,6 +15,7 @@ from shinnku_bot.config import Settings
 from shinnku_bot.harness.attention import addressed
 from shinnku_bot.harness.engine import Harness
 from shinnku_bot.harness.factory import build_harness
+from shinnku_bot.harness.nsfw import NsfwCheck
 from shinnku_bot.store import Store
 from shinnku_bot.tg import commands
 from shinnku_bot.tg.convert import picture, to_msg
@@ -79,6 +81,11 @@ async def _post_init(application: Application) -> None:
     settings: Settings = application.bot_data["settings"]
     me = await application.bot.get_me()
     store = Store(settings.db_path)
+    try:
+        check = await asyncio.to_thread(NsfwCheck, settings.models_dir)
+    except Exception as exc:  # noqa: BLE001 - without the check no picture is sent out
+        log.warning("nsfw check unavailable, pictures stay placeholders error=%s", type(exc).__name__)
+        check = None
     harness = build_harness(
         settings,
         store,
@@ -86,6 +93,7 @@ async def _post_init(application: Application) -> None:
         bot_id=me.id,
         bot_username=me.username,
         fetch=partial(download, application.bot),
+        check=check,
     )
     application.bot_data.update(me=me, store=store, harness=harness, started=time.time())
     log.info(

@@ -24,6 +24,10 @@ WAIT_S = 15.0
 
 # file_id -> the image bytes.
 Fetch = Callable[[str], Awaitable[bytes]]
+# The image bytes -> whether the picture must stay on this machine (NSFW).
+Check = Callable[[bytes], bool]
+# What a picture that stayed here shows, as far as the chat is concerned.
+NSFW_SEEN = "色图"
 
 PROMPT = (
     "这是群聊里有人发的一张图（照片、截图或表情包）。用一句中文说清楚图里是什么；"
@@ -63,9 +67,15 @@ async def describe(model: ChatModel, image: bytes) -> str:
     return " ".join(text.split())[:MAX_SEEN]
 
 
-async def _see(store: Store, model: ChatModel, fetch: Fetch, file_id: str, file_uid: str) -> bool:
+async def _see(
+    store: Store, model: ChatModel, fetch: Fetch, check: Check, file_id: str, file_uid: str
+) -> bool:
     try:
-        text = await describe(model, await fetch(file_id))
+        image = await fetch(file_id)
+        if await asyncio.to_thread(check, image):
+            text = NSFW_SEEN
+        else:
+            text = await describe(model, image)
     except Exception as exc:  # noqa: BLE001 - a picture I could not see keeps its placeholder
         log.warning("look failed error=%s", type(exc).__name__)
         return False
@@ -79,8 +89,13 @@ def _filled(store: Store, msg: Msg) -> Msg:
     return replace(msg, seen=picture[2]) if picture and picture[2] else msg
 
 
-async def look(msgs: Sequence[Msg], store: Store, model: ChatModel, fetch: Fetch) -> list[Msg]:
-    """`msgs` with what each picture shows, looking now at the ones I have not seen."""
+async def look(
+    msgs: Sequence[Msg], store: Store, model: ChatModel, fetch: Fetch, check: Check
+) -> list[Msg]:
+    """`msgs` with what each picture shows, looking now at the ones I have not seen.
+
+    A picture `check` flags is not sent to `model`; it shows as NSFW_SEEN.
+    """
     unseen: dict[str, str] = {}  # file_uid -> file_id
     for msg in msgs:
         picture = store.picture(msg.chat_id, msg.message_id) if msg.kind in PICTURES else None
@@ -89,7 +104,7 @@ async def look(msgs: Sequence[Msg], store: Store, model: ChatModel, fetch: Fetch
     if unseen:
         try:
             seen = await asyncio.wait_for(
-                asyncio.gather(*(_see(store, model, fetch, fid, uid) for uid, fid in unseen.items())),
+                asyncio.gather(*(_see(store, model, fetch, check, fid, uid) for uid, fid in unseen.items())),
                 WAIT_S,
             )
             log.info("looked pictures=%d seen=%d", len(unseen), sum(seen))

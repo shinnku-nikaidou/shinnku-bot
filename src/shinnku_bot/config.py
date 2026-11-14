@@ -27,7 +27,8 @@ class Settings:
     # Model for the few merging calls of distillation. Empty means the chat model.
     llm_model_slow: str = ""
     # Same gateway; answers the bot's calls for a while after the chat model fails
-    # (quota gone, gateway down). Empty means no backup.
+    # (quota gone, gateway down), and always looks at pictures. Empty means no
+    # backup, and the chat model looks at pictures.
     llm_model_fallback: str = ""
     # Saying one of these names in a chat wakes the bot up.
     name_triggers: tuple[str, ...] = ("真红", "shinnku")
