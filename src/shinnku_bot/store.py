@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS messages (
     kind       TEXT    NOT NULL,
     text       TEXT    NOT NULL,
     reply_to   INTEGER,
+    quote      TEXT    NOT NULL DEFAULT '',
     PRIMARY KEY (chat_id, message_id)
 );
 CREATE INDEX IF NOT EXISTS idx_messages_chat_ts ON messages (chat_id, ts);
@@ -47,6 +48,8 @@ class Msg:
     text: str = ""
     is_bot: bool = False
     reply_to: int | None = None
+    # What a reply quotes, as Telegram sent it: the part picked, or the whole message.
+    quote: str = ""
 
 
 @dataclass(frozen=True)
@@ -67,6 +70,7 @@ def _to_msg(row: sqlite3.Row) -> Msg:
         text=row["text"],
         is_bot=bool(row["is_bot"]),
         reply_to=row["reply_to"],
+        quote=row["quote"],
     )
 
 
@@ -78,6 +82,9 @@ class Store:
         self._db.row_factory = sqlite3.Row
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.executescript(_SCHEMA)
+        columns = {row["name"] for row in self._db.execute("PRAGMA table_info(messages)")}
+        if "quote" not in columns:  # a store made before quotes were kept
+            self._db.execute("ALTER TABLE messages ADD COLUMN quote TEXT NOT NULL DEFAULT ''")
         self._db.commit()
 
     def close(self) -> None:
@@ -87,12 +94,13 @@ class Store:
         self._db.execute(
             """
             INSERT INTO messages
-                (chat_id, message_id, ts, user_id, user_name, is_me, is_bot, kind, text, reply_to)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (chat_id, message_id, ts, user_id, user_name, is_me, is_bot, kind, text, reply_to,
+                 quote)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(chat_id, message_id) DO UPDATE SET
                 ts = excluded.ts, user_id = excluded.user_id, user_name = excluded.user_name,
                 is_me = excluded.is_me, is_bot = excluded.is_bot, kind = excluded.kind,
-                text = excluded.text, reply_to = excluded.reply_to
+                text = excluded.text, reply_to = excluded.reply_to, quote = excluded.quote
             """,
             (
                 msg.chat_id,
@@ -105,6 +113,7 @@ class Store:
                 msg.kind,
                 msg.text,
                 msg.reply_to,
+                msg.quote,
             ),
         )
         self._db.commit()

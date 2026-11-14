@@ -162,7 +162,7 @@ class PairTests(CorpusCase):
             [
                 {"role": "user", "content": "小林: 吃了没"},
                 {"role": "assistant", "content": "没"},
-                {"role": "user", "content": "小林（回复我）: 那走"},
+                {"role": "user", "content": "小林（回复我「没」）: 那走"},
             ],
         )
 

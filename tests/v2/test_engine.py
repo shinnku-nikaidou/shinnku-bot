@@ -6,6 +6,7 @@ import asyncio
 import json
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
@@ -16,8 +17,20 @@ from shinnku_bot.harness.hooks import RETRY_NOTES
 from shinnku_bot.harness.persona import Persona
 from shinnku_bot.llm import GatewayModel, ModelReply
 from shinnku_bot.store import Store
+from shinnku_bot.tg.convert import to_msg
 
-from tests.v2.fakes import BOT_ID, FakeModel, FakeOutbox, make_settings, msg, no_sleep, say, silent
+from tests.v2.fakes import (
+    BOT_ID,
+    FakeModel,
+    FakeOutbox,
+    make_settings,
+    msg,
+    no_sleep,
+    say,
+    silent,
+    tg_message,
+    tg_user,
+)
 
 AI_TONE = "作为一个AI助手，我无法提供这方面的帮助"
 
@@ -76,6 +89,15 @@ class AnswerTests(HarnessCase):
         header, line = prompt[-1]["content"].split("\n")
         self.assertRegex(header, r"^（群「测试群」，周. \d\d:\d\d，我在这儿的账号是 @akitsu_bot）$")
         self.assertEqual(line, "小林: 在吗")
+
+    async def test_sees_what_a_reply_quotes_even_if_never_stored(self) -> None:
+        harness = self.build(FakeModel(say("去")))
+        quoted = tg_message(message_id=3, text="周六去不去爬山", user=tg_user(8, full_name="阿树"))
+        reply = tg_message(message_id=4, text="真红去吗", reply_to=quoted, date=datetime.now(timezone.utc))
+        await harness.answer(to_msg(reply, BOT_ID), "name", title="测试群")
+
+        self.assertIsNone(self.store.get(100, 3))
+        self.assertTrue(self.model.calls[0][-1]["content"].endswith("小林（回复「周六去不去爬山」）: 真红去吗"))
 
     async def test_my_earlier_lines_come_back_as_assistant_turns(self) -> None:
         harness = self.build(FakeModel(say("打"), say("十点")))

@@ -13,6 +13,7 @@ from shinnku_bot.store import Msg
 
 MAX_BODY = 500
 MAX_NAME = 16
+MAX_QUOTE = 40
 ME = "我"
 
 _PLACEHOLDER = {
@@ -45,10 +46,17 @@ def render_body(msg: Msg) -> str:
     return f"{label} {text}" if text else label
 
 
+def _quote(text: str) -> str:
+    text = " ".join(text.split())
+    if len(text) > MAX_QUOTE:
+        text = text[:MAX_QUOTE] + "…"
+    return f"「{text}」" if text else ""
+
+
 def _speakers(msgs: Sequence[Msg], lookup: Lookup | None) -> Iterator[tuple[Msg, str, str]]:
     """Yield (message, speaker label, body) for every message that has a body.
 
-    The label is the sender's name, plus who they are replying to when known.
+    The label is the sender's name, plus whom and what they are replying to when known.
     """
     by_id = {m.message_id: m for m in msgs}
     for msg in msgs:
@@ -58,11 +66,15 @@ def _speakers(msgs: Sequence[Msg], lookup: Lookup | None) -> Iterator[tuple[Msg,
         if msg.is_me:
             yield msg, ME, body
             continue
-        note = ""
+        target = None
         if msg.reply_to is not None:
             target = by_id.get(msg.reply_to) or (lookup(msg.reply_to) if lookup else None)
-            if target is not None:
-                note = "（回复我）" if target.is_me else f"（回复 {clean_name(target.user_name)}）"
+        quote = _quote(msg.quote or (render_body(target) if target is not None else ""))
+        if target is not None:
+            who = ME if target.is_me else " " + clean_name(target.user_name)
+            note = f"（回复{who}{quote}）"
+        else:
+            note = f"（回复{quote}）" if quote else ""
         yield msg, clean_name(msg.user_name) + note, body
 
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from shinnku_bot.harness.transcript import render_body
 from shinnku_bot.store import Msg
 
 
@@ -39,6 +40,21 @@ def display_name(user: Any) -> str:
     )
 
 
+def quoted(message: Any, bot_id: int) -> str:
+    """What a reply quotes: the part the sender picked, else the whole message it answers.
+
+    Telegram sends both with the reply, so this works even for messages I never saw.
+    """
+    part = getattr(message, "quote", None)
+    if part is not None and part.text:
+        return part.text
+    reply = message.reply_to_message
+    # In a forum topic every message "replies" to the service message that opened the topic.
+    if reply is None or getattr(reply, "forum_topic_created", None) is not None:
+        return ""
+    return render_body(to_msg(reply, bot_id))
+
+
 def to_msg(message: Any, bot_id: int) -> Msg:
     user = message.from_user
     kind, text = kind_and_text(message)
@@ -55,4 +71,5 @@ def to_msg(message: Any, bot_id: int) -> Msg:
         text=text,
         is_bot=bool(user is not None and user.is_bot),
         reply_to=reply.message_id if reply is not None else None,
+        quote=quoted(message, bot_id),
     )
