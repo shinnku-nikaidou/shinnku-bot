@@ -15,6 +15,8 @@ log = logging.getLogger(__name__)
 
 # How long the backup answers alone after the main model fails.
 FALLBACK_S = 30 * 60
+# Without one the codex models send each call to whichever cache, and mostly miss.
+CACHE_KEY = "shinnku-bot"
 
 
 @dataclass(frozen=True)
@@ -92,6 +94,7 @@ class GatewayModel:
             "tools": tools,
             "tool_choice": "required",
             "max_tokens": self.max_tokens,
+            "prompt_cache_key": CACHE_KEY,
         }
         if self.thinking if thinking is None else thinking:
             kwargs["reasoning_effort"] = self.effort

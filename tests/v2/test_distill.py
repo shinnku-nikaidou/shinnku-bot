@@ -357,15 +357,14 @@ class PromptTests(unittest.TestCase):
         system = messages[0]["content"]
         self.assertLess(system.index("我是我"), system.index(FACTS_INTRO))
         self.assertLess(system.index("我住在杭州"), system.index(ANCHOR_INTRO))
-        self.assertEqual(messages[1]["content"], f"群的事\n\n{MEMORY_INTRO}\n\n一段往事")
-        self.assertEqual(messages[2]["content"], "（群聊）\n小林: 在吗")
+        self.assertEqual(messages[1]["content"], f"群的事\n\n{MEMORY_INTRO}\n\n一段往事\n\n（群聊）\n小林: 在吗")
 
     def test_optional_parts_leave_no_trace(self) -> None:
         messages = build_messages("我是我", "（群聊）", self.TURNS)
         self.assertEqual([m["role"] for m in messages], ["system", "user"])
         self.assertEqual(messages[0]["content"], "我是我")
         only_around = build_messages("我是我", "（群聊）", self.TURNS, around="群的事")
-        self.assertEqual(only_around[1]["content"], "群的事")
+        self.assertEqual(only_around[1]["content"], "群的事\n\n（群聊）\n小林: 在吗")
 
     def test_unprompted_header(self) -> None:
         now = datetime(2026, 11, 11, 21, 14)

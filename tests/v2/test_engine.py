@@ -353,6 +353,7 @@ class GatewayModelTests(unittest.IsolatedAsyncioTestCase):
         body = json.loads(self.requests[0].content)
         self.assertEqual(body["tool_choice"], "required")
         self.assertEqual(body["reasoning_effort"], "low")
+        self.assertEqual(body["prompt_cache_key"], "shinnku-bot")
         self.assertNotIn("thinking", body)
         self.assertEqual(str(self.requests[0].url), "http://gateway.test/v1/chat/completions")
 

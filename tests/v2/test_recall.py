@@ -337,16 +337,15 @@ class PromptMemoryTests(unittest.TestCase):
             messages,
             [
                 {"role": "system", "content": f"我是我\n\n{ANCHOR_INTRO}\n\n小林: 吃了没\n我: 没"},
-                {"role": "system", "content": f"{MEMORY_INTRO}\n\n小林: 在吗\n我: 在"},
-                {"role": "user", "content": "（群聊）\n小林: 在吗"},
+                {"role": "user", "content": f"{MEMORY_INTRO}\n\n小林: 在吗\n我: 在\n\n（群聊）\n小林: 在吗"},
             ],
         )
 
     def test_stable_prefix_does_not_depend_on_memory(self) -> None:
-        with_memory = build_messages("我", "h", self.TURNS, anchor="a", memory="m")
+        with_memory = build_messages("我", "h", self.TURNS, anchor="a", memory="m", around="群的事")
         without = build_messages("我", "h", self.TURNS, anchor="a")
         self.assertEqual(with_memory[0], without[0])
-        self.assertEqual(len(without), 2)
+        self.assertEqual([m["role"] for m in with_memory], ["system", "user"])
 
 
 class FakeRecall:
@@ -396,10 +395,10 @@ class HarnessMemoryTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(recall.queries, [("真红在吗", 100, 7)])
         prompt = self.model.calls[0]
-        self.assertEqual([m["role"] for m in prompt], ["system", "system", "user"])
+        self.assertEqual([m["role"] for m in prompt], ["system", "user"])
         self.assertIn(ANCHOR_INTRO, prompt[0]["content"])
         self.assertTrue(prompt[0]["content"].endswith("小林: 吃了没\n我: 没"))
-        self.assertEqual(prompt[1]["content"], f"{MEMORY_INTRO}\n\n小林: 在吗\n我: 在")
+        self.assertTrue(prompt[1]["content"].startswith(f"{MEMORY_INTRO}\n\n小林: 在吗\n我: 在\n\n（"))
 
     async def test_broken_recall_still_answers(self) -> None:
         harness = self.build(FakeRecall(fail=True))

@@ -64,10 +64,11 @@ def build_messages(
     facts: str = "",
     around: str = "",
 ) -> list[dict[str, str]] | None:
-    """Identity, facts and fixed sample; this place and recalled moments; the chat.
+    """Identity, facts and fixed sample; then the chat, opened by this place and recalled moments.
 
-    The first message never changes between requests, so it is what the gateway
-    caches. Returns None when there is nothing to answer: no turns, or I spoke last.
+    The system message never changes between requests, so it caches. What changes
+    goes in the chat: the codex models cache nothing past a system text that
+    changes. Returns None when there is nothing to answer: no turns, or I spoke last.
     """
     if not turns or turns[-1]["role"] != "user":
         return None
@@ -78,17 +79,17 @@ def build_messages(
         system += f"\n\n{ANCHOR_INTRO}\n\n{anchor.strip()}"
     messages = [{"role": "system", "content": system}]
 
-    second = [around.strip()] if around.strip() else []
+    opening = [around.strip()] if around.strip() else []
     if memory.strip():
-        second.append(f"{MEMORY_INTRO}\n\n{memory.strip()}")
-    if second:
-        messages.append({"role": "system", "content": "\n\n".join(second)})
+        opening.append(f"{MEMORY_INTRO}\n\n{memory.strip()}")
+    opening.append(header)
+    lead = "\n\n".join(opening)
 
     body = [dict(turn) for turn in turns]
     if body[0]["role"] == "user":
-        body[0]["content"] = f"{header}\n{body[0]['content']}"
+        body[0]["content"] = f"{lead}\n{body[0]['content']}"
     else:
-        body.insert(0, {"role": "user", "content": header})
+        body.insert(0, {"role": "user", "content": lead})
     messages.extend(body)
     messages.extend({"role": "system", "content": note} for note in notes)
     return messages
