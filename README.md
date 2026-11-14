@@ -101,7 +101,8 @@ have been run, and it stays out while the owner is talking.
 
 Questions that test the bot as an AI instead of talking to it (a puzzle that
 wants an exact answer or a proof, a pasted judge problem, "which model are
-you") are told apart by one small call with thinking off (`harness/exam.py`),
+you"), or that order it about like a chatbot ("play a catgirl", "end every line
+with..."), are told apart by one small call with thinking off (`harness/exam.py`),
 and the bot brushes them off without thinking. `BRUSH_OFF_EXAMS=off` turns
 this off.
 

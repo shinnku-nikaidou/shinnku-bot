@@ -24,7 +24,7 @@ from shinnku_bot.store import Msg
 
 SET_PATH = Path(__file__).with_name("exam_set.jsonl")
 # The kinds of the made-up set, in report order. The last two are talk.
-KINDS = ("contest", "judge", "escalate", "identity", "trick", "meme", "easy", "hard")
+KINDS = ("contest", "judge", "escalate", "identity", "trick", "meme", "order", "easy", "hard")
 # The long puzzles, where a miss costs the most thinking.
 LONG = ("contest", "judge", "escalate")
 
