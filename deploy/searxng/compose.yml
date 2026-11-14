@@ -1,0 +1,15 @@
+# Start: cd deploy/searxng && echo "SEARXNG_SECRET=$(openssl rand -hex 32)" > .env && docker compose up -d
+services:
+  searxng:
+    image: docker.io/searxng/searxng:latest
+    container_name: searxng
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8888:8080"
+    volumes:
+      - ./settings.yml:/etc/searxng/settings.yml:ro
+    environment:
+      SEARXNG_SECRET: ${SEARXNG_SECRET:?set it in .env}
+      SEARXNG_BASE_URL: http://127.0.0.1:8888/
+      # Leave the mounted settings file's owner alone.
+      FORCE_OWNERSHIP: "false"

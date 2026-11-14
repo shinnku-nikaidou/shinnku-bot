@@ -1,0 +1,16 @@
+# SearXNG for the bot's web lookups. Only reachable from this machine.
+# The secret comes from SEARXNG_SECRET in compose.yml.
+use_default_settings: true
+
+general:
+  instance_name: shinnku-bot
+
+search:
+  # The bot reads results as JSON.
+  formats: [html, json]
+  safe_search: 0
+
+server:
+  # One local client: no bot detection, no image proxy.
+  limiter: false
+  image_proxy: false
