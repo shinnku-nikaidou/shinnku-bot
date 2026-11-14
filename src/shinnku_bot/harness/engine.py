@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 from shinnku_bot.config import Settings
 from shinnku_bot.harness.act import TOOLS, Say, parse_action
 from shinnku_bot.harness.attention import blocked
+from shinnku_bot.harness.exam import BRUSH_OFF, is_exam
 from shinnku_bot.harness.hooks import RETRY_NOTES, StyleLimits, check
 from shinnku_bot.harness.look import Check, Fetch, look
 from shinnku_bot.harness.persona import Persona
@@ -32,6 +33,8 @@ log = logging.getLogger(__name__)
 URGE = "urge"
 # With more than this many newer lines from others, my answer quotes what it answers.
 QUOTE_AFTER = 4
+# How much longer a reply waits for the exam check, which started when the message came in.
+EXAM_WAIT_S = 3.0
 
 
 @dataclass(frozen=True)
@@ -59,6 +62,8 @@ class _Chat:
     committed: bool = False
     restarts: int = 0
     dirty: bool = False
+    # The exam check of the last message that called me: (its message id, the check).
+    exam: tuple[int, asyncio.Task] | None = None
 
 
 class Harness:
@@ -159,6 +164,9 @@ class Harness:
             log.info("skip chat=%s why=%s", msg.chat_id, deny)
             return
 
+        if self.settings.brush_off_exams:
+            # Judged while I wait for them to stop typing.
+            chat.exam = (msg.message_id, asyncio.get_running_loop().create_task(self._exam(msg)))
         chat.trigger, chat.reason, chat.last_activity = msg, reason, clock
         if active:
             self._interrupt(msg.chat_id, chat)
@@ -221,6 +229,21 @@ class Harness:
         if tasks:
             await asyncio.wait(tasks, timeout=timeout)
 
+    async def _exam(self, msg: Msg) -> bool:
+        replied = self.store.get(msg.chat_id, msg.reply_to) if msg.reply_to is not None else None
+        recent = self.store.recent(msg.chat_id, 4, self.settings.context_max_age_s, self._now())
+        before = [m for m in recent if m.message_id != msg.message_id][-3:]
+        return await is_exam(self.model, msg, replied, before)
+
+    async def _exam_verdict(self, chat: _Chat) -> bool:
+        """Whether the message I am answering is a question set to test me as an AI."""
+        if chat.exam is None or chat.trigger is None or chat.exam[0] != chat.trigger.message_id:
+            return False
+        try:
+            return await asyncio.wait_for(asyncio.shield(chat.exam[1]), EXAM_WAIT_S)
+        except TimeoutError:
+            return False
+
     def _urge(self, chat_id: int) -> bool:
         """Nobody called me: is this moment worth asking myself whether to speak?"""
         if self.gate is None:
@@ -277,13 +300,16 @@ class Harness:
             except Exception as exc:  # noqa: BLE001 - answering without memories beats not answering
                 log.warning("recall failed chat=%s error=%s", chat_id, type(exc).__name__)
 
-        notes: list[str] = []
+        # A question set to test me gets brushed off, without thinking it over.
+        exam = await self._exam_verdict(chat)
+        base = [BRUSH_OFF] if exam else []
+        notes = list(base)
         final: tuple[str, ...] = ()
         violations: tuple[str, ...] = ()
         reply: ModelReply | None = None
         attempts = 0
         latency = 0.0
-        plain: dict[str, bool] = {}
+        plain: dict[str, bool] = {"thinking": False} if exam else {}
         thought: list[int] = []  # reasoning tokens of each try
         for attempt in range(2):
             messages = build_messages(
@@ -325,7 +351,7 @@ class Harness:
                 final = result.messages
                 break
             if attempt == 0:
-                notes = [RETRY_NOTES[name] for name in violations]
+                notes = base + [RETRY_NOTES[name] for name in violations]
                 continue
             # Second draft is still off. Long is tolerable; sounding like a help desk is not.
             final = () if "ai_tone" in violations else result.messages

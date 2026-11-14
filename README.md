@@ -102,8 +102,8 @@ have been run, and it stays out while the owner is talking.
 Questions that test the bot as an AI instead of talking to it (a puzzle that
 wants an exact answer or a proof, a pasted judge problem, "which model are
 you") are told apart by one small call with thinking off (`harness/exam.py`),
-so the bot can brush them off without thinking. `BRUSH_OFF_EXAMS=off` turns
-this off. The reply pipeline does not use it yet.
+and the bot brushes them off without thinking. `BRUSH_OFF_EXAMS=off` turns
+this off.
 
 ```bash
 uv run --inexact shinnku memory digest

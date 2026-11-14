@@ -43,6 +43,9 @@ PROMPT = """下面是 Telegram 群里有人发给 shinnku 的一条消息，夹�
 
 拿不准就想：群里会不会有人这样问一个朋友。会，就不算。"""
 
+# Put last in the prompt of the reply to such a question, which is made with thinking off.
+BRUSH_OFF = "（这条不是跟我聊天，是在拿我当 AI 出题考我。我不做题、不写代码，也不讲道理，像平时那样骂回去一两句就完。）"
+
 TOOL: dict[str, Any] = {
     "type": "function",
     "function": {

@@ -13,10 +13,11 @@ import httpx
 from openai import AsyncOpenAI, RateLimitError
 
 from shinnku_bot.harness.engine import Harness
+from shinnku_bot.harness.exam import BRUSH_OFF
 from shinnku_bot.harness.factory import build_harness, live_model
 from shinnku_bot.harness.hooks import RETRY_NOTES
 from shinnku_bot.harness.persona import Persona
-from shinnku_bot.llm import FALLBACK_S, FallbackModel, GatewayModel, ModelReply
+from shinnku_bot.llm import FALLBACK_S, FallbackModel, GatewayModel, ModelReply, ToolCall
 from shinnku_bot.store import Store
 from shinnku_bot.tg.convert import to_msg
 
@@ -34,6 +35,23 @@ from tests.v2.fakes import (
 )
 
 AI_TONE = "作为一个AI助手，我无法提供这方面的帮助"
+
+
+class ExamModel(FakeModel):
+    """Gives `verdict` to the exam check (raises it if it is an exception); replies like FakeModel."""
+
+    def __init__(self, verdict: object, *replies: ModelReply) -> None:
+        super().__init__(*replies)
+        self.verdict = verdict
+        self.judged = 0
+
+    async def complete(self, messages, tools, **options):  # type: ignore[override]
+        if tools[0]["function"]["name"] != "judge":
+            return await super().complete(messages, tools, **options)
+        self.judged += 1
+        if isinstance(self.verdict, Exception):
+            raise self.verdict
+        return ModelReply(tool_calls=(ToolCall("judge", {"exam": self.verdict}),))
 
 
 class HarnessCase(unittest.IsolatedAsyncioTestCase):
@@ -266,6 +284,44 @@ class DebounceTests(HarnessCase):
         await asyncio.sleep(0.1)
         self.assertEqual(self.model.calls, [])
         self.assertEqual(self.store.count(100), 1, "still recorded")
+
+    async def test_a_question_set_to_test_me_is_brushed_off_without_thinking(self) -> None:
+        harness = self.build(ExamModel(True, say("滚")), brush_off_exams=True)
+        harness.handle(msg(1, "真红 画个鹈鹕骑自行车的svg"), "name", title="测试群")
+        await self.settle(harness)
+        self.assertEqual(self.model.judged, 1)
+        self.assertEqual(self.model.options, [{"thinking": False}])
+        self.assertEqual(self.model.calls[0][-1], {"role": "system", "content": BRUSH_OFF})
+        self.assertEqual(self.outbox.texts, ["滚"])
+
+    async def test_the_brush_off_note_stays_on_the_second_try(self) -> None:
+        harness = self.build(ExamModel(True, say("x" * 200), say("滚")), brush_off_exams=True)
+        harness.handle(msg(1, "真红 证明一下"), "name", title="测试群")
+        await self.settle(harness)
+        notes = [m["content"] for m in self.model.calls[1] if m["role"] == "system"][-2:]
+        self.assertEqual(notes, [BRUSH_OFF, RETRY_NOTES["too_long"]])
+
+    async def test_talk_is_answered_as_usual(self) -> None:
+        harness = self.build(ExamModel(False, say("来")), brush_off_exams=True)
+        harness.handle(msg(1, "真红 打游戏吗"), "name", title="测试群")
+        await self.settle(harness)
+        self.assertEqual(self.model.judged, 1)
+        self.assertEqual(self.model.options, [{}])
+        self.assertNotIn(BRUSH_OFF, [m["content"] for m in self.model.calls[0]])
+
+    async def test_a_failed_exam_check_answers_as_usual(self) -> None:
+        harness = self.build(ExamModel(RuntimeError("down"), say("来")), brush_off_exams=True)
+        harness.handle(msg(1, "真红 打游戏吗"), "name", title="测试群")
+        await self.settle(harness)
+        self.assertEqual(self.model.options, [{}])
+        self.assertEqual(self.outbox.texts, ["来"])
+
+    async def test_no_exam_check_when_turned_off(self) -> None:
+        harness = self.build(ExamModel(True, say("来")))
+        harness.handle(msg(1, "真红 打游戏吗"), "name", title="测试群")
+        await self.settle(harness)
+        self.assertEqual(self.model.judged, 0)
+        self.assertEqual(self.outbox.texts, ["来"])
 
     async def test_model_failure_does_not_wedge_the_chat(self) -> None:
         class Flaky(FakeModel):
