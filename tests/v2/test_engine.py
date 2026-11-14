@@ -14,7 +14,7 @@ from openai import AsyncOpenAI, RateLimitError
 
 from shinnku_bot.harness.engine import Harness
 from shinnku_bot.harness.factory import build_harness, live_model
-from shinnku_bot.harness.hooks import RETRY_NOTES
+from shinnku_bot.harness.hooks import AI_TONE_NOTE
 from shinnku_bot.harness.persona import Persona
 from shinnku_bot.llm import FALLBACK_S, FallbackModel, GatewayModel, ModelReply
 from shinnku_bot.store import Store
@@ -146,8 +146,8 @@ class AnswerTests(HarnessCase):
         self.assertEqual(self.outbox.texts, ["不知道"])
         self.assertEqual(outcome.attempts, 2)
         self.assertEqual(len(self.model.calls), 2)
-        self.assertEqual(self.model.calls[1][-1], {"role": "system", "content": RETRY_NOTES["ai_tone"]})
-        self.assertNotIn(RETRY_NOTES["ai_tone"], json.dumps(self.model.calls[0], ensure_ascii=False))
+        self.assertEqual(self.model.calls[1][-1], {"role": "system", "content": AI_TONE_NOTE})
+        self.assertNotIn(AI_TONE_NOTE, json.dumps(self.model.calls[0], ensure_ascii=False))
 
     async def test_help_desk_voice_twice_means_silence(self) -> None:
         harness = self.build(FakeModel(say(AI_TONE)))
@@ -157,12 +157,17 @@ class AnswerTests(HarnessCase):
         self.assertEqual(self.outbox.sent, [])
         self.assertEqual(len(self.model.calls), 2)
 
-    async def test_long_twice_is_sent_anyway(self) -> None:
+    async def test_long_goes_out_without_a_second_try(self) -> None:
         long_text = "啊" * 100
         harness = self.build(FakeModel(say(long_text)))
         outcome = await harness.answer(msg(1, "讲讲"), "mention")
-        self.assertEqual(outcome.kind, "said")
+        self.assertEqual((outcome.kind, outcome.attempts, outcome.violations), ("said", 1, ("too_long",)))
         self.assertEqual(self.outbox.texts, [long_text])
+
+    async def test_code_goes_out_as_one_message(self) -> None:
+        harness = self.build(FakeModel(say("给", "```py\na = 1\nb = 2\n```")))
+        await harness.answer(msg(1, "真红 写两行"), "mention")
+        self.assertEqual(self.outbox.texts, ["给", "```\na = 1\nb = 2\n```"])
 
     async def test_trace_is_written_only_when_enabled(self) -> None:
         harness = self.build(FakeModel(say("嗯")), trace=True)

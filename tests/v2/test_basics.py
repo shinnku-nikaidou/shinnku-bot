@@ -9,17 +9,19 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
+from telegram.error import RetryAfter
+
 from shinnku_bot.config import load_settings
 from shinnku_bot.harness.act import Say, Silent, parse_action
 from shinnku_bot.harness.attention import addressed, blocked, mentions_bot
-from shinnku_bot.harness.hooks import StyleLimits, clean, fit, violations_of
+from shinnku_bot.harness.hooks import CODE_MAX, StyleLimits, clean, code_of, fit, violations_of
 from shinnku_bot.harness.prompt import build_messages, scene_header
 from shinnku_bot.harness.send import typing_delay
 from shinnku_bot.harness.transcript import clean_name, render_turns
 from shinnku_bot.llm import ModelReply, ToolCall
 from shinnku_bot.store import ChatState, Store
 from shinnku_bot.tg.commands import parse_level, parse_minutes
-from shinnku_bot.tg.app import STALE_S, on_message
+from shinnku_bot.tg.app import STALE_S, TelegramOutbox, on_message
 from shinnku_bot.tg.convert import to_msg
 
 from tests.v2.fakes import (
@@ -296,6 +298,24 @@ class HookTests(unittest.TestCase):
     def test_too_long(self) -> None:
         self.assertEqual(violations_of(["啊" * 81, "a"], StyleLimits(max_len=80)), ("too_long",))
 
+    def test_code_stays_one_message(self) -> None:
+        fenced = clean(["看这个", "```python\nx = 1\n\nprint(x)\n```", "就这样"])
+        self.assertEqual(fenced, ("看这个", "```\nx = 1\n\nprint(x)\n```", "就这样"))
+        self.assertEqual(code_of(fenced[1]), "x = 1\n\nprint(x)")
+        self.assertIsNone(code_of(fenced[0]))
+        self.assertEqual(clean(["跑 ```ls -la```", "```ls -la```"]), ("跑 ls -la", "```\nls -la\n```"))
+        self.assertEqual(clean(["```\na\nb"]), ("```\na\nb\n```",), "a block never closed ends with the message")
+
+    def test_long_code_is_cut_between_lines(self) -> None:
+        lines = [str(i) * 1000 for i in range(9)]
+        parts = clean(["```\n" + "\n".join(lines) + "\n```"])
+        self.assertEqual(len(parts), 3)
+        self.assertTrue(all(len(part) <= CODE_MAX + 8 for part in parts))
+        self.assertEqual("\n".join(code_of(part) or "" for part in parts), "\n".join(lines))
+
+    def test_code_is_not_checked_for_style(self) -> None:
+        self.assertEqual(violations_of(["```\n# 以下是" + "啊" * 100 + "\n```"]), ())
+
     def test_fit_merges_the_overflow_instead_of_dropping_it(self) -> None:
         self.assertEqual(fit(["a", "b"], 3), ("a", "b"))
         self.assertEqual(fit(["a", "b", "c", "d", "e"], 3), ("a", "b", "c\nd\ne"))
@@ -395,6 +415,36 @@ class OnMessageTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_no_message_no_work(self) -> None:
         await on_message(SimpleNamespace(message=None), SimpleNamespace(bot_data={}))
+
+
+class OutboxTests(unittest.IsolatedAsyncioTestCase):
+    async def test_code_goes_out_as_code_after_waiting_out_flood_control(self) -> None:
+        calls: list[dict[str, object]] = []
+
+        class Bot:
+            async def send_message(self, **kwargs: object) -> SimpleNamespace:
+                calls.append(kwargs)
+                if len(calls) == 1:
+                    raise RetryAfter(0)
+                return SimpleNamespace(message_id=5)
+
+        self.assertEqual(await TelegramOutbox(Bot()).send(1, "```\nprint('好😀')\n```", 3), 5)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[1]["text"], "print('好😀')")
+        entity = calls[1]["entities"][0]
+        self.assertEqual((entity.type, entity.offset, entity.length), ("pre", 0, 12))
+        self.assertEqual(calls[1]["reply_parameters"].message_id, 3)
+
+    async def test_plain_text_has_no_entities(self) -> None:
+        calls: list[dict[str, object]] = []
+
+        class Bot:
+            async def send_message(self, **kwargs: object) -> SimpleNamespace:
+                calls.append(kwargs)
+                return SimpleNamespace(message_id=6)
+
+        await TelegramOutbox(Bot()).send(1, "在", None)
+        self.assertEqual((calls[0]["text"], calls[0]["entities"], calls[0]["reply_parameters"]), ("在", None, None))
 
 
 class ConvertTests(unittest.TestCase):

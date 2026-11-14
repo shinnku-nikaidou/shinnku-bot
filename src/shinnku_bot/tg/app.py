@@ -5,16 +5,19 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from datetime import timedelta
 from functools import partial
 
-from telegram import Bot, ReplyParameters, Update
+from telegram import Bot, MessageEntity, ReplyParameters, Update
 from telegram.constants import ChatAction
+from telegram.error import RetryAfter
 from telegram.ext import Application, ContextTypes, MessageHandler, filters
 
 from shinnku_bot.config import Settings
 from shinnku_bot.harness.attention import addressed
 from shinnku_bot.harness.engine import Harness
 from shinnku_bot.harness.factory import build_harness
+from shinnku_bot.harness.hooks import code_of
 from shinnku_bot.harness.nsfw import NsfwCheck
 from shinnku_bot.store import Store
 from shinnku_bot.tg import commands
@@ -40,7 +43,18 @@ class TelegramOutbox:
             if reply_to is not None
             else None
         )
-        sent = await self._bot.send_message(chat_id=chat_id, text=text, reply_parameters=reply)
+        entities = None
+        if (code := code_of(text)) is not None:
+            # Entity lengths count UTF-16 code units.
+            text, entities = code, [MessageEntity(MessageEntity.PRE, 0, len(code.encode("utf-16-le")) // 2)]
+        kwargs = {"chat_id": chat_id, "text": text, "reply_parameters": reply, "entities": entities}
+        try:
+            sent = await self._bot.send_message(**kwargs)
+        except RetryAfter as exc:
+            # Flood control: wait as long as Telegram asks, then send it once more.
+            wait = exc.retry_after
+            await asyncio.sleep(wait.total_seconds() if isinstance(wait, timedelta) else float(wait))
+            sent = await self._bot.send_message(**kwargs)
         return sent.message_id
 
 

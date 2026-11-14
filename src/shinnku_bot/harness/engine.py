@@ -17,7 +17,7 @@ from shinnku_bot.config import Settings
 from shinnku_bot.harness.act import TOOLS, Line, Say, parse_action
 from shinnku_bot.harness.attention import blocked
 from shinnku_bot.harness.hooks import (
-    RETRY_NOTES,
+    AI_TONE_NOTE,
     StyleLimits,
     clean,
     fit,
@@ -384,14 +384,14 @@ class Harness:
                 break
             lines = tuple((to, text) for to, item in action.messages for text in clean([item], self.limits))
             violations = violations_of([text for _, text in lines], self.limits)
-            if not violations:
+            # Long is tolerable; sounding like a help desk is not, and gets one more try.
+            if "ai_tone" not in violations:
                 final = lines
                 break
             if attempt == 0:
-                notes = [RETRY_NOTES[name] for name in violations]
+                notes = [AI_TONE_NOTE]
                 continue
-            # Second draft is still off. Long is tolerable; sounding like a help desk is not.
-            final = () if "ai_tone" in violations else lines
+            final = ()
 
         assert reply is not None
         answers = self._route(asks, final)
