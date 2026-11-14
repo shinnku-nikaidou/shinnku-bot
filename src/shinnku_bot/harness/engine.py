@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 from shinnku_bot.config import Settings
 from shinnku_bot.harness.act import TOOLS, Line, Say, parse_action
 from shinnku_bot.harness.attention import blocked
+from shinnku_bot.harness.exam import BRUSH_OFF, is_exam
 from shinnku_bot.harness.hooks import (
     AI_TONE_NOTE,
     StyleLimits,
@@ -59,6 +60,8 @@ BATCH = 6
 PER_ASKER = 3
 # Messages in one turn, within Telegram's 20 a minute in a group.
 TURN_MESSAGES = 12
+# How much longer a turn waits for the exam checks, which started when the questions came in.
+EXAM_WAIT_S = 3.0
 # A question whose turn failed this many times is dropped.
 MAX_TRIES = 3
 # The longest I wait when the gateway says how long to wait.
@@ -86,6 +89,13 @@ class Ask:
     arrived: float
     taken: bool = False  # in the turn under way
     tries: int = 0  # turns that failed with it
+    # Whether it is a question set to test me as an AI, judged from when it came in.
+    exam: asyncio.Task[bool] | None = None
+
+    @property
+    def is_exam(self) -> bool:
+        """Judged an exam in time. A check still running or turned off counts as talk."""
+        return self.exam is not None and self.exam.done() and not self.exam.cancelled() and self.exam.result()
 
 
 @dataclass
@@ -203,6 +213,9 @@ class Harness:
         self._wake(msg.chat_id, chat)
 
     def _queue(self, chat_id: int, chat: _Chat, ask: Ask) -> None:
+        if self.settings.brush_off_exams:
+            # Judged while I wait for them to stop typing.
+            ask.exam = asyncio.get_running_loop().create_task(self._exam(ask.msg))
         chat.asks.append(ask)
         chat.last_activity = ask.arrived
         chat.urge = None  # being called comes first
@@ -224,6 +237,7 @@ class Harness:
                     await self._quiet(chat, chat.asks[0].arrived)
                     self._expire(chat_id, chat)
                     if chat.asks:
+                        await self._judged(chat)
                         await self._turn(chat_id, chat, self._take(chat))
                     continue
                 await self._quiet(chat, chat.urge_since)
@@ -262,14 +276,36 @@ class Harness:
                 return
             await asyncio.sleep(wait)
 
+    async def _exam(self, msg: Msg) -> bool:
+        try:
+            replied = self.store.get(msg.chat_id, msg.reply_to) if msg.reply_to is not None else None
+            recent = self.store.recent(msg.chat_id, 8, self.settings.context_max_age_s, self._now())
+        except Exception as exc:  # noqa: BLE001 - without a verdict I answer as usual
+            log.warning("exam check failed chat=%s error=%s", msg.chat_id, type(exc).__name__)
+            return False
+        # Only what came before it: lines that arrived since are not its context.
+        before = [m for m in recent if m.message_id < msg.message_id][-3:]
+        return await is_exam(self.model, msg, replied, before)
+
+    async def _judged(self, chat: _Chat) -> None:
+        """Give the exam checks of the waiting questions up to EXAM_WAIT_S more."""
+        running = [ask.exam for ask in chat.asks if ask.exam is not None and not ask.exam.done()]
+        if running:
+            await asyncio.wait(running, timeout=EXAM_WAIT_S)
+
     def _take(self, chat: _Chat) -> list[Ask]:
-        """This turn's questions: oldest first, a few per person; the rest wait."""
+        """This turn's questions: oldest first, a few per person; the rest wait.
+
+        Exams and talk never share a turn, since thinking is on or off for a whole
+        call. Exams go first: answering them takes no thinking, so it is quick.
+        """
+        exams = any(ask.is_exam for ask in chat.asks)
         batch: list[Ask] = []
         per_asker: Counter[int | None] = Counter()
         for ask in chat.asks:
             if len(batch) == BATCH:
                 break
-            if per_asker[ask.msg.user_id] < PER_ASKER:
+            if ask.is_exam == exams and per_asker[ask.msg.user_id] < PER_ASKER:
                 per_asker[ask.msg.user_id] += 1
                 ask.taken = True
                 batch.append(ask)
@@ -380,13 +416,16 @@ class Harness:
             except Exception as exc:  # noqa: BLE001 - answering without memories beats not answering
                 log.warning("recall failed chat=%s error=%s", chat_id, type(exc).__name__)
 
-        notes: list[str] = []
+        # Questions set to test me get brushed off, without thinking them over.
+        exam = bool(asks) and all(ask.is_exam for ask in asks)
+        base = [BRUSH_OFF] if exam else []
+        notes = list(base)
         final: tuple[Line, ...] = ()
         violations: tuple[str, ...] = ()
         reply: ModelReply | None = None
         attempts = 0
         latency = 0.0
-        plain: dict[str, bool] = {}
+        plain: dict[str, bool] = {"thinking": False} if exam else {}
         thought: list[int] = []  # reasoning tokens of each try
         loop = asyncio.get_running_loop()
         started = loop.time()
@@ -438,7 +477,7 @@ class Harness:
                 final = lines
                 break
             if attempt == 0:
-                notes = [AI_TONE_NOTE]
+                notes = [*base, AI_TONE_NOTE]
                 continue
             final = ()
 
@@ -447,11 +486,12 @@ class Harness:
         said = tuple(text for _, texts in answers for text in texts)
         kind = "said" if said else "silent"
         log.info(
-            "%s chat=%s why=%s asks=%d listed=%s answered=%d left=%d n=%d lens=%s recalled=%d "
-            "tries=%d latency=%.1fs prompt_tok=%d cached=%d reasoning_tok=%s violations=%s",
+            "%s chat=%s why=%s exam=%s asks=%d listed=%s answered=%d left=%d n=%d lens=%s "
+            "recalled=%d tries=%d latency=%.1fs prompt_tok=%d cached=%d reasoning_tok=%s violations=%s",
             kind,
             chat_id,
             why,
+            exam,
             len(asks),
             bool(pending),
             sum(ask is not None for ask, _ in answers),

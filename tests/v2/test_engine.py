@@ -13,10 +13,11 @@ import httpx
 from openai import AsyncOpenAI, RateLimitError
 
 from shinnku_bot.harness.engine import Harness
+from shinnku_bot.harness.exam import BRUSH_OFF
 from shinnku_bot.harness.factory import build_harness, gateway_model, live_model
 from shinnku_bot.harness.hooks import AI_TONE_NOTE
 from shinnku_bot.harness.persona import Persona
-from shinnku_bot.llm import FALLBACK_S, FallbackModel, GatewayModel, ModelReply
+from shinnku_bot.llm import FALLBACK_S, FallbackModel, GatewayModel, ModelReply, ToolCall
 from shinnku_bot.store import Store
 from shinnku_bot.tg.convert import to_msg
 
@@ -35,6 +36,25 @@ from tests.v2.fakes import (
 )
 
 AI_TONE = "作为一个AI助手，我无法提供这方面的帮助"
+
+
+class ExamModel(FakeModel):
+    """Gives `verdict` to the exam check (raises it if it is an exception, calls it on the
+    message text if it is a function); replies like FakeModel."""
+
+    def __init__(self, verdict: object, *replies: ModelReply, delay: float = 0.0) -> None:
+        super().__init__(*replies, delay=delay)
+        self.verdict = verdict
+        self.judged = 0
+
+    async def complete(self, messages, tools, **options):  # type: ignore[override]
+        if tools[0]["function"]["name"] != "judge":
+            return await super().complete(messages, tools, **options)
+        self.judged += 1
+        if isinstance(self.verdict, Exception):
+            raise self.verdict
+        verdict = self.verdict(messages[-1]["content"]) if callable(self.verdict) else self.verdict
+        return ModelReply(tool_calls=(ToolCall("judge", {"exam": verdict}),))
 
 
 class HarnessCase(unittest.IsolatedAsyncioTestCase):
@@ -349,6 +369,64 @@ class DebounceTests(HarnessCase):
         await asyncio.sleep(0.1)
         self.assertEqual(self.model.calls, [])
         self.assertEqual(self.store.count(100), 1, "still recorded")
+
+
+class ExamTests(HarnessCase):
+    """Questions set to test me as an AI are brushed off, without thinking."""
+
+    async def test_a_question_set_to_test_me_is_brushed_off_without_thinking(self) -> None:
+        harness = self.build(ExamModel(True, say("滚")), brush_off_exams=True)
+        harness.handle(msg(1, "真红 画个鹈鹕骑自行车的svg"), "name", title="测试群")
+        await self.settle(harness)
+        self.assertEqual(self.model.judged, 1)
+        self.assertEqual(self.model.options, [{"thinking": False}])
+        self.assertEqual(self.model.calls[0][-1], {"role": "system", "content": BRUSH_OFF})
+        self.assertEqual(self.outbox.texts, ["滚"])
+
+    async def test_the_brush_off_note_stays_on_the_second_try(self) -> None:
+        harness = self.build(ExamModel(True, say(AI_TONE), say("滚")), brush_off_exams=True)
+        harness.handle(msg(1, "真红 证明一下"), "name", title="测试群")
+        await self.settle(harness)
+        notes = [m["content"] for m in self.model.calls[1] if m["role"] == "system"][-2:]
+        self.assertEqual(notes, [BRUSH_OFF, AI_TONE_NOTE])
+        self.assertEqual(self.outbox.texts, ["滚"])
+
+    async def test_talk_is_answered_as_usual(self) -> None:
+        harness = self.build(ExamModel(False, say("来")), brush_off_exams=True)
+        harness.handle(msg(1, "真红 打游戏吗"), "name", title="测试群")
+        await self.settle(harness)
+        self.assertEqual(self.model.judged, 1)
+        self.assertEqual(self.model.options, [{}])
+        self.assertNotIn(BRUSH_OFF, [m["content"] for m in self.model.calls[0]])
+
+    async def test_a_failed_exam_check_answers_as_usual(self) -> None:
+        harness = self.build(ExamModel(RuntimeError("down"), say("来")), brush_off_exams=True)
+        harness.handle(msg(1, "真红 打游戏吗"), "name", title="测试群")
+        await self.settle(harness)
+        self.assertEqual(self.model.options, [{}])
+        self.assertEqual(self.outbox.texts, ["来"])
+
+    async def test_no_exam_check_when_turned_off(self) -> None:
+        harness = self.build(ExamModel(True, say("来")))
+        harness.handle(msg(1, "真红 打游戏吗"), "name", title="测试群")
+        await self.settle(harness)
+        self.assertEqual(self.model.judged, 0)
+        self.assertEqual(self.outbox.texts, ["来"])
+
+    async def test_exams_go_first_and_never_share_a_turn_with_talk(self) -> None:
+        model = ExamModel(lambda text: "证明" in text.split("这条消息")[-1], say("嗯"), say("滚"), say("来"), delay=0.1)
+        harness = self.build(model, brush_off_exams=True)
+        harness.handle(msg(1, "真红 在吗"), "name", title="测试群")
+        await asyncio.sleep(0.06)  # thinking about the first one
+        harness.handle(msg(2, "真红 打游戏吗", user_id=8, name="阿树"), "name", title="测试群")
+        harness.handle(msg(3, "真红 证明根号二是无理数", user_id=9, name="阿秋"), "name", title="测试群")
+        await self.settle(harness)
+
+        self.assertEqual(model.options, [{}, {"thinking": False}, {}])
+        self.assertIn("阿秋: 真红 证明根号二是无理数", model.calls[1][-2]["content"])
+        self.assertNotIn("阿树", model.calls[1][-2]["content"].split("还没回")[-1])
+        self.assertIn("[1] 阿树: 真红 打游戏吗", model.calls[2][-1]["content"])
+        self.assertEqual(self.outbox.texts, ["嗯", "滚", "来"])
 
 
 class FailureTests(HarnessCase):

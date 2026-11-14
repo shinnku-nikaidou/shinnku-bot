@@ -75,6 +75,8 @@ chats, the bare model) say how to read the number. `--no-recall`, `--no-anchor`,
 uv run --inexact shinnku eval facts    # asks the bot the quiz about me
 uv run --inexact shinnku eval urge     # does it speak where I spoke, uncalled
 uv run --inexact shinnku eval quiz --name base   # take the blind test yourself
+uv run --inexact shinnku eval exam     # tells questions that test the AI from talk?
+uv run --inexact shinnku eval exam --real 200    # false alarms on what people really asked me
 ```
 
 ## Run
@@ -97,12 +99,20 @@ and for the owner `/talk [0-3]` and `/status`.
 0 never (the default), 3 about as often as I do. This needs `corpus moments` to
 have been run, and it stays out while the owner is talking.
 
+Questions that test the bot as an AI instead of talking to it (a puzzle that
+wants an exact answer or a proof, a pasted judge problem, "which model are
+you") are told apart by one small call with thinking off (`harness/exam.py`),
+and the bot brushes them off without thinking. `BRUSH_OFF_EXAMS=off` turns
+this off.
+
 ```bash
 uv run --inexact shinnku memory digest
 ```
 
 writes yesterday's diary for each group, which the bot reads for the next three
 days. `deploy/` has a systemd timer that runs it every night.
+`shinnku memory forget` deletes the groups' stored messages and diaries; the
+group and people cards stay.
 
 Logs carry ids, counts and timings, never message text. The full exchange for
 each reply is appended to `data/trace/`.

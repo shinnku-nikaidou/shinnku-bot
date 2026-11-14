@@ -96,6 +96,15 @@ class StoreTests(unittest.TestCase):
         self.store.record(msg(2, "去啊", reply_to=1, quote="爬山"))
         self.assertEqual(self.store.get(100, 2).quote, "爬山")
 
+    def test_forgetting_the_groups_keeps_private_chats(self) -> None:
+        self.store.record(msg(1, "群里", chat_id=-100))
+        self.store.record(msg(1, "私聊", chat_id=7))
+        self.store.add_picture(-100, 1, "f", "u")
+        self.assertEqual(self.store.forget_groups(), 1)
+        self.assertEqual(self.store.count(-100), 0)
+        self.assertIsNone(self.store.picture(-100, 1))
+        self.assertEqual(self.store.count(7), 1)
+
     def test_store_made_before_quotes_gains_the_column(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "old.sqlite3"

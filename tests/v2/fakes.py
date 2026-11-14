@@ -28,6 +28,8 @@ def make_settings(data_dir: Path, **overrides: Any) -> Settings:
         "quiet_window_s": 0.03,
         "max_wait_s": 0.3,
         "trace": False,
+        # The exam check is one more model call; the tests that want it turn it on.
+        "brush_off_exams": False,
     }
     values.update(overrides)
     return Settings(**values)
