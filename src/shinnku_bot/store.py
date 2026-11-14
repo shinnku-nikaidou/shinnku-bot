@@ -170,6 +170,13 @@ class Store:
             (chat_id, message_id),
         ).fetchone()[0]
 
+    def forget_groups(self) -> int:
+        """Delete every group's messages and pictures; private chats stay. Returns the messages deleted."""
+        deleted = self._db.execute("DELETE FROM messages WHERE chat_id < 0").rowcount
+        self._db.execute("DELETE FROM pictures WHERE chat_id < 0")
+        self._db.commit()
+        return deleted
+
     def chat_ids(self) -> list[int]:
         rows = self._db.execute("SELECT DISTINCT chat_id FROM messages ORDER BY chat_id").fetchall()
         return [row[0] for row in rows]

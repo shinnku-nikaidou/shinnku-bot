@@ -103,6 +103,8 @@ uv run --inexact shinnku memory digest
 
 writes yesterday's diary for each group, which the bot reads for the next three
 days. `deploy/` has a systemd timer that runs it every night.
+`shinnku memory forget` deletes the groups' stored messages and diaries; the
+group and people cards stay.
 
 Logs carry ids, counts and timings, never message text. The full exchange for
 each reply is appended to `data/trace/`.

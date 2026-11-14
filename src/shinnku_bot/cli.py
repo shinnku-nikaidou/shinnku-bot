@@ -443,6 +443,24 @@ def _memory_digest(settings: Settings, args: argparse.Namespace) -> int:
     return 1 if counts.get("failed") else 0
 
 
+def _memory_forget(settings: Settings, args: argparse.Namespace) -> int:
+    """Forget what happened in the groups: their stored messages and diaries. The cards stay."""
+    import shutil
+
+    from shinnku_bot.store import Store
+
+    store = Store(settings.db_path)
+    try:
+        messages = store.forget_groups()
+    finally:
+        store.close()
+    diary = settings.persona_dir / "diary"  # only groups keep a diary
+    days = len(list(diary.glob("*/*.md")))
+    shutil.rmtree(diary, ignore_errors=True)
+    print(f"forget: messages={messages} diary_days={days}")
+    return 0
+
+
 # -- eval ---------------------------------------------------------------------
 
 
@@ -750,6 +768,9 @@ def build_parser() -> argparse.ArgumentParser:
     digest_cmd.add_argument("--date", help="YYYY-MM-DD instead of yesterday")
     digest_cmd.add_argument("--force", action="store_true", help="rewrite a diary that already exists")
     digest_cmd.set_defaults(func=_corpus(_memory_digest))
+    memory_sub.add_parser(
+        "forget", help="forget what happened in the groups: their stored messages and diaries"
+    ).set_defaults(func=_corpus(_memory_forget))
 
     evaluate = sub.add_parser("eval", help="blind test against held-out real replies")
     eval_sub = evaluate.add_subparsers(dest="eval_command", required=True)
