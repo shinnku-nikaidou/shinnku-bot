@@ -16,6 +16,7 @@ from shinnku_bot.config import Settings
 from shinnku_bot.harness.act import TOOLS, Say, parse_action
 from shinnku_bot.harness.attention import blocked
 from shinnku_bot.harness.hooks import RETRY_NOTES, StyleLimits, check
+from shinnku_bot.harness.look import Fetch, look
 from shinnku_bot.harness.persona import Persona
 from shinnku_bot.harness.prompt import build_messages, render_around, scene_header
 from shinnku_bot.harness.recall import Recall
@@ -75,6 +76,8 @@ class Harness:
         gate: Gate | None = None,
         limits: StyleLimits = StyleLimits(),
         pace: Pace = Pace(),
+        # Downloads a picture; without it pictures stay placeholders.
+        fetch: Fetch | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         rng: Callable[[], float] = random.random,
         now: Callable[[], float] = time.time,
@@ -90,6 +93,7 @@ class Harness:
         self.gate = gate
         self.limits = limits
         self.pace = pace
+        self.fetch = fetch
         self._sleep = sleep
         self._rng = rng
         self._now = now
@@ -245,6 +249,8 @@ class Harness:
         msgs = self.store.recent(
             chat_id, self.settings.context_messages, self.settings.context_max_age_s, now
         )
+        if self.fetch is not None:
+            msgs = await look(msgs, self.store, self.model, self.fetch)
         turns = render_turns(msgs, lookup=lambda message_id: self.store.get(chat_id, message_id))
         unprompted = chat.reason == URGE
         header = scene_header(

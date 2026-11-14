@@ -31,6 +31,28 @@ def kind_and_text(message: Any) -> tuple[str, str]:
     return "other", caption
 
 
+# Big enough to read the text in a screenshot.
+PHOTO_SIDE = 1280
+
+
+def picture(message: Any) -> tuple[str, str] | None:
+    """The image to look at for a photo, sticker or GIF, as (file_id, file_unique_id).
+
+    Animated and video stickers and GIFs are looked at through their still thumbnail.
+    """
+    if getattr(message, "photo", None):
+        # Telegram lists the sizes from small to large.
+        sizes = [p for p in message.photo if max(p.width, p.height) <= PHOTO_SIDE]
+        file = (sizes or message.photo[:1])[-1]
+    elif (sticker := getattr(message, "sticker", None)) is not None:
+        file = sticker.thumbnail if sticker.is_animated or sticker.is_video else sticker
+    elif (animation := getattr(message, "animation", None)) is not None:
+        file = animation.thumbnail
+    else:
+        return None
+    return (file.file_id, file.file_unique_id) if file is not None else None
+
+
 def display_name(user: Any) -> str:
     return (
         getattr(user, "full_name", None)
