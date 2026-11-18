@@ -27,9 +27,10 @@ class Settings:
     # Model for the few merging calls of distillation. Empty means the chat model.
     llm_model_slow: str = ""
     # Same gateway; answers the bot's calls for a while after the chat model fails
-    # (quota gone, gateway down), and always looks at pictures. Empty means no
-    # backup, and the chat model looks at pictures.
+    # (quota gone, gateway down). Empty means no backup.
     llm_model_fallback: str = ""
+    # Same gateway; looks at pictures, with no backup behind it. Empty means the chat model.
+    llm_model_look: str = ""
     # Saying one of these names in a chat wakes the bot up.
     name_triggers: tuple[str, ...] = ("真红", "shinnku")
     # Empty means every chat is allowed.
@@ -139,6 +140,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         llm_model_judge=env.get("LLM_MODEL_JUDGE", "").strip(),
         llm_model_slow=env.get("LLM_MODEL_SLOW", "").strip(),
         llm_model_fallback=env.get("LLM_MODEL_FALLBACK", "").strip(),
+        llm_model_look=env.get("LLM_MODEL_LOOK", "").strip(),
         name_triggers=tuple(names) if names else defaults["name_triggers"].default,
         allowed_chat_ids=frozenset(int(x) for x in _csv(env, "ALLOWED_CHAT_IDS")),
         allow_private=_flag(env, "ALLOW_PRIVATE", True),

@@ -57,6 +57,7 @@ class ConfigTests(unittest.TestCase):
             **self.ENV,
             "LLM_THINKING": "off",
             "LLM_MODEL_FALLBACK": " codex/x ",
+            "LLM_MODEL_LOOK": " codex/eyes ",
             "NAME_TRIGGERS": "阿橘, 橘子",
             "ALLOWED_CHAT_IDS": "-100, 5",
             "DATA_DIR": "/tmp/x",
@@ -64,6 +65,7 @@ class ConfigTests(unittest.TestCase):
         settings = load_settings(env)
         self.assertFalse(settings.llm_thinking)
         self.assertEqual(settings.llm_model_fallback, "codex/x")
+        self.assertEqual(settings.llm_model_look, "codex/eyes")
         self.assertEqual(settings.name_triggers, ("阿橘", "橘子"))
         self.assertEqual(settings.allowed_chat_ids, frozenset({-100, 5}))
         self.assertEqual(settings.persona_dir, Path("/tmp/x/persona"))

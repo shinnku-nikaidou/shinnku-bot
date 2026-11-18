@@ -59,10 +59,8 @@ def build_harness(
     gate = Gate(settings, urge) if urge is not None else None
     if model is None:
         model = live_model(settings)
-        if settings.llm_model_fallback:
-            # The chat model may not take pictures, and a refused picture would hand
-            # every reply to the backup for a while; the backup looks at them instead.
-            kwargs.setdefault("look_model", gateway_model(settings, settings.llm_model_fallback, max_retries=0))
+        # Not through the backup: a refused picture would hand every reply to it for a while.
+        kwargs.setdefault("look_model", gateway_model(settings, settings.llm_model_look, max_retries=0))
     if settings.searxng_url:
         kwargs.setdefault("search", SearXNG(settings.searxng_url))
     return Harness(

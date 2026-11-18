@@ -711,16 +711,19 @@ class FallbackModelTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((model.main._client.max_retries, model.backup._client.max_retries), (0, 0))
             self.assertEqual(gateway_model(settings)._client.max_retries, 1, "evaluations keep the SDK's retry")
 
-    def test_the_backup_looks_at_pictures(self) -> None:
+    def test_pictures_go_to_the_look_model_without_the_backup(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = Store(":memory:")
             self.addCleanup(store.close)
-            plain = build_harness(make_settings(Path(tmp)), store, FakeOutbox(), bot_id=BOT_ID)
-            backed = build_harness(
-                make_settings(Path(tmp), llm_model_fallback="codex/x"), store, FakeOutbox(), bot_id=BOT_ID
+            backed = {"llm_model_fallback": "ds/x"}
+            plain = build_harness(make_settings(Path(tmp), **backed), store, FakeOutbox(), bot_id=BOT_ID)
+            eyes = build_harness(
+                make_settings(Path(tmp), **backed, llm_model_look="codex/eyes"), store, FakeOutbox(), bot_id=BOT_ID
             )
-        self.assertIs(plain.look_model, plain.model)
-        self.assertEqual(backed.look_model.model, "codex/x")
+        self.assertIsInstance(plain.look_model, GatewayModel)
+        self.assertEqual(plain.look_model.model, "test-model")
+        self.assertEqual(eyes.look_model.model, "codex/eyes")
+        self.assertEqual(eyes.look_model._client.max_retries, 0)
 
 
 if __name__ == "__main__":
