@@ -75,6 +75,19 @@ uv run shinnku eval exam     # tells questions that test the AI from talk?
 uv run shinnku eval exam --real 200    # false alarms on what people really asked me
 ```
 
+## Fine-tune
+
+```bash
+uv run shinnku corpus sft
+```
+
+writes `data/sft/`: training examples (the prompt the live harness would build,
+without the fixed sample, recall or facts, and what I really said) and the
+prompts of the held-out moments `eval run --n 200` answers. `finetune/` trains a
+LoRA on them on a Colab GPU and writes a reply for each held-out moment;
+`eval run --replies data/sft/eval_out.jsonl` scores those replies like any other
+run. The `colab` commands are in [plans/finetune-plan.md](plans/finetune-plan.md).
+
 ## Run
 
 ```bash

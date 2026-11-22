@@ -8,7 +8,7 @@ import itertools
 import json
 import random
 import time
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -57,6 +57,24 @@ class EvalOptions:
     use_anchor: bool = True
     # Off by default: model judges proved unreliable here and cost a lot of quota.
     judge: bool = False
+    # Replies written elsewhere (the fine-tune on Colab) instead of calling a model.
+    replies: str = ""
+
+
+class Canned:
+    """Says a reply written elsewhere, whatever it is asked."""
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+    async def complete(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]], **options: Any) -> ModelReply:
+        return ModelReply(content=self.text)
+
+
+def load_replies(path: Path) -> dict[int, str]:
+    """{"id", "reply"} lines, as the fine-tune writes them -> reply by pair id."""
+    lines = Path(path).read_text(encoding="utf-8").splitlines()
+    return {row["id"]: row["reply"] for row in map(json.loads, filter(str.strip, lines))}
 
 
 class _NoAnchor(Persona):
@@ -287,7 +305,10 @@ async def run_eval(
     limits: StyleLimits,
     options: EvalOptions,
     progress: Callable[[str], None] = lambda line: None,
+    replies: Mapping[int, str] | None = None,
 ) -> list[Item]:
+    """With `replies`, each moment gets the reply written for it there instead of a model call;
+    it still goes through the harness, so it is cleaned and checked the same way."""
     pairs = sample_pairs(db, options.n, options.seed)
     reference = reference_scenes(persona)
     used_persona = persona if options.use_anchor else _NoAnchor(settings.persona_dir)
@@ -308,7 +329,8 @@ async def run_eval(
                 done += 1
                 failed += 1
                 return Item(pair.pair_id, pair.chat_id, pair.ts, error="Skipped")
-            item = await generate_one(settings, db, pair, model, used_persona, used_recall, limits)
+            used_model = model if replies is None else Canned(replies.get(pair.pair_id, ""))
+            item = await generate_one(settings, db, pair, used_model, used_persona, used_recall, limits)
             failed += bool(item.error)
             if judge is not None and options.judge:
                 await judge_one(judge, reference, item, orders[pair.pair_id])

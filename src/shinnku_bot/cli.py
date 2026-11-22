@@ -424,6 +424,34 @@ def _moments(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+def _sft(settings: Settings, args: argparse.Namespace) -> int:
+    from shinnku_bot.corpus.db import CorpusDB
+    from shinnku_bot.corpus.sft import write_sft
+    from shinnku_bot.corpus.stats import limits_from_fingerprint
+    from shinnku_bot.harness.recall import load_recall
+
+    db = CorpusDB(settings.corpus_db)
+    try:
+        recall = load_recall(settings.corpus_db, settings.index_dir, settings.embed_model, settings.models_dir)
+        counts = asyncio.run(
+            write_sft(
+                settings,
+                db,
+                recall,
+                limits_from_fingerprint(settings.persona_dir / "fingerprint.json"),
+                settings.sft_dir,
+                args.pairs,
+                args.valid,
+                args.n,
+                args.seed,
+            )
+        )
+    finally:
+        db.close()
+    print(f"sft: {counts} -> {settings.sft_dir}")
+    return 0
+
+
 # -- memory -------------------------------------------------------------------
 
 
@@ -468,13 +496,23 @@ def _eval_run(settings: Settings, args: argparse.Namespace) -> int:
     from shinnku_bot.corpus.db import CorpusDB
     from shinnku_bot.corpus.stats import limits_from_fingerprint
     from shinnku_bot.eval.metrics import format_summary, summarize
-    from shinnku_bot.eval.run import DraftPersona, EvalOptions, run_eval, save_report
+    from shinnku_bot.eval.run import (
+        DraftPersona,
+        EvalOptions,
+        load_replies,
+        run_eval,
+        save_report,
+    )
     from shinnku_bot.harness.factory import gateway_model
     from shinnku_bot.harness.persona import Persona
     from shinnku_bot.harness.recall import load_recall
 
+    replies = load_replies(Path(args.replies)) if args.replies else None
     if args.model:
         settings = dataclasses.replace(settings, llm_model=args.model)
+    if replies is not None:
+        # The replies were written already; the prompt here only has to get them cleaned.
+        settings = dataclasses.replace(settings, llm_model=f"replies:{Path(args.replies).name}")
     if args.no_thinking:
         settings = dataclasses.replace(settings, llm_thinking=False)
     if args.recall_scenes is not None:
@@ -483,9 +521,10 @@ def _eval_run(settings: Settings, args: argparse.Namespace) -> int:
         n=args.n,
         seed=args.seed,
         concurrency=args.concurrency,
-        use_recall=not args.no_recall,
-        use_anchor=not args.no_anchor,
+        use_recall=not args.no_recall and replies is None,
+        use_anchor=not args.no_anchor and replies is None,
         judge=args.judge,
+        replies=args.replies or "",
     )
     judge_name, judge = _judge(settings, args)
     db = CorpusDB(settings.corpus_db)
@@ -509,6 +548,7 @@ def _eval_run(settings: Settings, args: argparse.Namespace) -> int:
                 limits_from_fingerprint(settings.persona_dir / "fingerprint.json"),
                 options,
                 progress=print,
+                replies=replies,
             )
         )
     finally:
@@ -760,6 +800,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     moments_cmd = corpus_sub.add_parser("moments", help="learn when I join in uncalled (no model calls)")
     moments_cmd.set_defaults(func=_corpus(_moments))
+    sft_cmd = corpus_sub.add_parser("sft", help="write training data and held-out prompts for a fine-tune")
+    sft_cmd.add_argument("--pairs", type=int, default=5000, help="training examples")
+    sft_cmd.add_argument("--valid", type=int, default=300, help="examples kept back to watch the loss")
+    sft_cmd.add_argument("--n", type=int, default=200, help="held-out moments, as `eval run --n`")
+    sft_cmd.add_argument("--seed", type=int, default=0)
+    sft_cmd.set_defaults(func=_corpus(_sft))
 
     distill_cmd = corpus_sub.add_parser("distill", help="distil who I am, the people and the groups")
     distill_sub = distill_cmd.add_subparsers(dest="distill_command", required=True)
@@ -809,6 +855,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_cmd.add_argument("--no-anchor", action="store_true")
     run_cmd.add_argument("--judge", action="store_true", help="also ask a model which reply is real")
     run_cmd.add_argument("--draft", action="store_true", help="use FACTS.draft.md, not the live facts")
+    run_cmd.add_argument("--replies", help="replies the fine-tune wrote (finetune/train.py) instead of a model")
     run_cmd.set_defaults(func=_corpus(_eval_run))
     recall_cmd = eval_sub.add_parser("recall", help="offline check of what recall surfaces")
     recall_cmd.add_argument("--n", type=int, default=100)

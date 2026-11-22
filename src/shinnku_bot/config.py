@@ -110,6 +110,10 @@ class Settings:
     def distill_dir(self) -> Path:
         return self.data_dir / "distill"
 
+    @property
+    def sft_dir(self) -> Path:
+        return self.data_dir / "sft"
+
 
 def _flag(env: Mapping[str, str], name: str, default: bool) -> bool:
     value = env.get(name)
