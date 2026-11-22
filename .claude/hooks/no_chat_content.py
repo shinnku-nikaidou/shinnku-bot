@@ -7,6 +7,9 @@ project's own `shinnku` commands, which print counts and statistics. Anything
 else that reaches for those places is refused: reading the files, naming them
 in a shell command, or running ad-hoc code that opens them through the
 project's settings or classes.
+
+One kind of shell command may name them, since it shows nothing of what is
+inside: `colab upload` / `colab download` of the fine-tune files under data/sft/.
 """
 
 from __future__ import annotations
@@ -39,6 +42,29 @@ PRIVATE = re.compile(
 # Commands of the project that show chat text on purpose; they are for the owner's own terminal.
 SHOWS_TEXT = re.compile(r"\bshinnku\s+eval\s+quiz\b|\bshinnku\s+chat\b(?!.*--stats-only)", re.DOTALL)
 SCRIPT = re.compile(r"\.(?:py|sh|sql)$")
+# Statements of a command line: split at && || ; newlines and a lone & (not the one in 2>&1).
+STATEMENTS = re.compile(r"&&|\|\||;|\n|(?<![>&])&(?![&>\d])")
+KEYWORD = re.compile(r"^\s*(?:(?:do|then|else)\s+)*")
+TRANSFER = re.compile(r"colab\s+(?:upload|download)\s")
+# What may read the output of a statement that names the records.
+PIPED = re.compile(r"\s*(?:tail|head)\b")
+FINE_TUNE_FILES = re.compile(r"(?:^|[\s\"'=])(?:\./)?data/sft/[\w.$/{}-]*")
+
+
+def only_moves_fine_tune_files(command: str) -> bool:
+    """Every statement that names the records copies fine-tune files with colab."""
+    for statement in STATEMENTS.split(command):
+        if not PRIVATE.search(statement):
+            continue
+        first, *piped = statement.split("|")
+        first = KEYWORD.sub("", first)
+        if "$(" in first or "`" in first or not TRANSFER.match(first):
+            return False
+        if not all(PIPED.match(stage) and not PRIVATE.search(stage) for stage in piped):
+            return False
+        if PRIVATE.search(FINE_TUNE_FILES.sub(" ", first)):
+            return False
+    return True
 
 
 def inside(path: Path, roots: list[Path]) -> bool:
@@ -72,7 +98,7 @@ def refusal(payload: dict) -> str | None:
         command = str(args.get("command", ""))
         if SHOWS_TEXT.search(command):
             return "this command prints chat text; it is for the owner's own terminal"
-        if PRIVATE.search(command):
+        if PRIVATE.search(command) and not only_moves_fine_tune_files(command):
             return "the command reaches for the chat records; use a `shinnku` command that prints statistics"
         for script in scripts_run_by(command, cwd):
             try:
