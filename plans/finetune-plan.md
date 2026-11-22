@@ -40,7 +40,7 @@
 - 命令（都在這臺服務器上跑）：
 
 ```bash
-colab new -s ft --gpu G4 --high-mem
+colab new -s ft --gpu G4
 colab ssh -s ft -- mkdir -p /content/sft
 for f in train valid eval eval_recall; do colab upload -s ft data/sft/$f.jsonl /content/sft/$f.jsonl; done
 colab upload -s ft finetune/setup.sh /content/setup.sh
@@ -102,7 +102,7 @@ Colab 按計算單元扣，100 個單元 US$9.99（約 HK$78）。G4 每小時�
 ## 5. 風險
 
 - **74G 只是 Unsloth 的數字**，換到 Qwen3.6、序列長度 4096 可能更多。G4 有 96G，A100 80G 不一定夠。爆了就調小 `SFT_BATCH` 或 `SFT_MAX_LEN`。
-- **G4 不一定分得到**，按 Colab 的說法看可用量。
+- **G4 不一定分得到**，按 Colab 的說法看可用量。2026-11-22 試開：帶 `--high-mem` 被直接拒絕（說沒有權限，賬上是 Google AI Pro 帶的 Colab 權益）；不帶它連試兩次都回 503。colabtools 的 [#6014](https://github.com/googlecolab/colabtools/issues/6014) 裡，Pro+ 用戶從 2026 年 6 月起就常常連不上 H100、G4、A100，Colab 的人說是空閒算力被用光了。普通規格的 G4 有多少內存，要等真分到了才知道。
 - **35B-A3B 比 gpt-6-astra 笨**，難題和代碼會答得差。考題本來就不答；新聞之類有檢索兜著。
 - **微調模型的老毛病**：突然跳話題、硬塞記住的細節（IMPersona 都觀察到了）。
 - **會背出訓練數據裡的話**，包括群裡別人說過的。
