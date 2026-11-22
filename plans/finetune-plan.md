@@ -54,6 +54,7 @@ colab stop -s ft
 ```
 
 - **先空跑一次**：在 T4 或 L4 上用 `unsloth/Qwen3.5-0.8B`，`--env SFT_MODEL=unsloth/Qwen3.5-0.8B --env SFT_MAX_STEPS=5 --env SFT_LIMIT=64`，把安裝、訓練、生成、下載整條流程走通，花不到一個計算單元。確認沒問題再開 G4。
+  - 2026-11-22 用編的假對話跑過一次，T4 上從開會話到停約 12 分鐘（裝環境 5 分鐘，訓練加生成 5.5 分鐘），花了 0.19 個單元，整條流程沒報錯。LoRA 掛在所有層的 MLP 和全注意力層的 q/k/v/o 上，線性注意力層不掛，和官方 notebook 一樣。
 
 ### 第 3 步：評估
 
@@ -81,6 +82,7 @@ uv run shinnku eval style --name ft
 - 把 LoRA 合併進底座，量化成 4-bit 的 GGUF（約 22G），用 llama.cpp 的服務在實驗室的 3090 Ti 上跑，它提供 OpenAI 兼容的接口。合併和量化可以在 Colab 上用 Unsloth 的 `save_pretrained_gguf` 做。有人報告 Unsloth 訓出來的 MoE LoRA 直接掛到 vLLM 上加載不了，所以先合併再量化。
 - 外網連不進那臺機器，要由它主動建隧道到 bot 的服務器。
 - `GatewayModel` 加純文本模式：不發 `tools` 和思考參數，回覆按行切成消息（`parse_action` 本來就接受純文本）。純文本沒有“沉默”和 `to` 編號，上線前要定怎麼處理。
+- Qwen3.5/3.6 的聊天模板只保留開頭的 system 消息，後面的會被默默丟掉。harness 把考題的“敷衍”和 AI 腔重試的提示放在聊天末尾的 system 消息裡，純文本模式要把它們併進最後一條 user 消息。訓練數據不受影響：回放時不判考題，也只截第一次的提示詞。
 - 量化以後再跑一次第 3 步的 A，確認風格沒有掉。
 - 分工：說話走微調模型；判斷考題、決定搜什麼、看圖仍然用 gpt-6-astra；備用模型不變。
 - 那張卡是和別人共用的，常駐服務會一直佔著約 22G 顯存。

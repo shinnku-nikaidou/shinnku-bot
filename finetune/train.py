@@ -96,7 +96,7 @@ def train(model, tokenizer, data: Path, out: Path):
         max_steps=int(setting("SFT_MAX_STEPS")),
         learning_rate=float(setting("SFT_LR")),
         lr_scheduler_type="cosine",
-        warmup_ratio=0.03,
+        warmup_steps=0.03,  # under 1: a share of all steps
         weight_decay=0.0,
         optim="adamw_8bit",
         bf16=is_bf16_supported(),
